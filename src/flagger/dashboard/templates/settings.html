@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — FedEx Flagger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <a href="/" class="btn btn-ghost">← Dashboard</a>
+    <div class="logo">🚩</div>
+    <h1 class="header-title">Settings</h1>
+  </div>
+</header>
+
+<main class="main">
+
+  <div class="card">
+    <h2 class="section-title">Bot Behaviour</h2>
+
+    <div class="settings-grid">
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="setting-label">Scan Interval</label>
+          <p class="setting-desc">How often the bot checks for new emails and statuses.</p>
+        </div>
+        <div class="setting-control">
+          <select id="check-interval" class="input input-sm">
+            <option value="60">Every 1 minute</option>
+            <option value="120" {% if check_interval == 120 %}selected{% endif %}>Every 2 minutes</option>
+            <option value="180">Every 3 minutes</option>
+            <option value="300">Every 5 minutes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="setting-label">Portal Date Range</label>
+          <p class="setting-desc">How many days back to look up statuses on the portal. 2 days is recommended to cover late-night emails.</p>
+        </div>
+        <div class="setting-control">
+          <select id="date-range" class="input input-sm">
+            <option value="1">1 day</option>
+            <option value="2" {% if date_range == 2 %}selected{% endif %}>2 days</option>
+            <option value="3">3 days</option>
+            <option value="7">7 days</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="setting-label">Dry Run Mode</label>
+          <p class="setting-desc">
+            When ON, the bot logs what it <em>would</em> flag but does not actually add flags to emails.
+            Recommended for the first shift to verify accuracy.
+          </p>
+        </div>
+        <div class="setting-control">
+          <label class="toggle">
+            <input type="checkbox" id="dry-run" {% if dry_run %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="dry-run-label" class="toggle-label">{{ 'ON (safe mode)' if dry_run else 'OFF (live mode)' }}</span>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="setting-label">Start with Windows</label>
+          <p class="setting-desc">Automatically start FedEx Flagger when Windows boots.</p>
+        </div>
+        <div class="setting-control">
+          <label class="toggle">
+            <input type="checkbox" id="auto-start" {% if auto_start %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn btn-green" onclick="saveSettings()">Save Settings</button>
+      <span id="settings-result" class="token-result"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">Portal API Token</h2>
+    <p class="setup-desc">Update if the portal token has expired.</p>
+    <div class="token-input-row">
+      <input id="token-input" class="input" type="text" placeholder="Paste new portal token here…" />
+      <button class="btn btn-ghost" onclick="testToken()">Test</button>
+      <button class="btn btn-green" onclick="saveToken()">Save & Apply</button>
+    </div>
+    <p id="token-result" class="token-result"></p>
+  </div>
+
+</main>
+
+<script>
+document.getElementById('dry-run').addEventListener('change', function() {
+  document.getElementById('dry-run-label').textContent = this.checked ? 'ON (safe mode)' : 'OFF (live mode)';
+});
+
+async function saveSettings() {
+  const result = document.getElementById('settings-result');
+  result.textContent = '⏳ Saving…'; result.className = 'token-result';
+  const payload = {
+    check_interval: parseInt(document.getElementById('check-interval').value),
+    date_range: parseInt(document.getElementById('date-range').value),
+    dry_run: document.getElementById('dry-run').checked,
+    auto_start: document.getElementById('auto-start').checked,
+  };
+  const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  const data = await res.json();
+  result.textContent = data.success ? '✅ ' + data.message : '❌ ' + data.message;
+  result.className = 'token-result ' + (data.success ? 'success' : 'error');
+}
+
+async function testToken() {
+  const token = document.getElementById('token-input').value.trim();
+  const result = document.getElementById('token-result');
+  if (!token) { result.textContent = '⚠ Please paste a token first.'; result.className = 'token-result error'; return; }
+  result.textContent = '⏳ Testing…'; result.className = 'token-result';
+  const res = await fetch('/api/token/test', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });
+  const data = await res.json();
+  result.textContent = (data.valid ? '✅ ' : '❌ ') + data.message;
+  result.className = 'token-result ' + (data.valid ? 'success' : 'error');
+}
+
+async function saveToken() {
+  const token = document.getElementById('token-input').value.trim();
+  const result = document.getElementById('token-result');
+  if (!token) { result.textContent = '⚠ Please paste a token first.'; result.className = 'token-result error'; return; }
+  const res = await fetch('/api/token/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });
+  const data = await res.json();
+  result.textContent = (data.success ? '✅ ' : '❌ ') + data.message;
+  result.className = 'token-result ' + (data.success ? 'success' : 'error');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FedEx Flagger — Registrar Corp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">🚩</div>
+    <div>
+      <h1 class="header-title">FedEx Flagger</h1>
+      <p class="header-sub">Registrar Corp — Prior Notice Monitor</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="dry-run-badge" class="badge badge-yellow" style="display:none">DRY RUN</span>
+    <span id="session-time" class="session-time">—</span>
+    <a href="/settings" class="btn btn-ghost">⚙ Settings</a>
+  </div>
+</header>
+
+<!-- ── Main layout ── -->
+<main class="main">
+
+  <!-- ── Alerts panel (hidden when empty) ── -->
+  <section id="alerts-panel" class="alerts-panel" style="display:none"></section>
+
+  <!-- ── Bot status card ── -->
+  <section class="card status-card">
+    <div class="status-left">
+      <div id="status-dot" class="status-dot dot-grey"></div>
+      <div>
+        <div id="status-label" class="status-label">Stopped</div>
+        <div id="status-detail" class="status-detail">—</div>
+      </div>
+    </div>
+    <div class="status-right">
+      <button id="btn-start" class="btn btn-green" onclick="startBot()" style="display:none">▶ Start Bot</button>
+      <button id="btn-stop"  class="btn btn-red"   onclick="stopBot()"  style="display:none">⏹ Stop Bot</button>
+      <button id="btn-resume" class="btn btn-yellow" onclick="resumeBot()" style="display:none">↺ Resume</button>
+    </div>
+  </section>
+
+  <!-- ── Stats row ── -->
+  <div class="stats-grid">
+    <div class="stat-card stat-green">
+      <div id="count-flagged" class="stat-value">0</div>
+      <div class="stat-label">✅ Flagged</div>
+    </div>
+    <div class="stat-card stat-yellow">
+      <div id="count-pending" class="stat-value">0</div>
+      <div class="stat-label">⏳ Pending</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div id="count-failed" class="stat-value">0</div>
+      <div class="stat-label">❌ Failed</div>
+    </div>
+    <div class="stat-card stat-orange">
+      <div id="count-error" class="stat-value">0</div>
+      <div class="stat-label">⚠ Errors</div>
+    </div>
+  </div>
+
+  <!-- ── System status ── -->
+  <section class="card">
+    <h2 class="section-title">System Status</h2>
+    <div class="system-status-grid">
+
+      <div class="sys-row">
+        <span class="sys-label">Outlook</span>
+        <span id="outlook-status-badge" class="badge badge-grey">Unknown</span>
+        <button id="btn-relogin" class="btn btn-sm btn-blue" onclick="relogin()" style="display:none">
+          Re-login to Outlook
+        </button>
+      </div>
+
+      <div class="sys-row">
+        <span class="sys-label">Portal API</span>
+        <span id="portal-token-badge" class="badge badge-grey">Unknown</span>
+        <button class="btn btn-sm btn-ghost" onclick="showTokenPanel()">Update Token</button>
+      </div>
+
+    </div>
+
+    <!-- Token update panel (collapsed by default) -->
+    <div id="token-panel" class="token-panel" style="display:none">
+      <p class="token-help">
+        <strong>How to get a new token:</strong>
+        Open <code>tools.registrarcorp.com</code> → Press F12 → Network → Fetch/XHR → click any request → copy the <code>token=</code> value from the URL.
+      </p>
+      <div class="token-input-row">
+        <input id="token-input" class="input" type="text" placeholder="Paste portal token here…" />
+        <button class="btn btn-ghost" onclick="testToken()">Test</button>
+        <button class="btn btn-green" onclick="saveToken()">Save & Apply</button>
+      </div>
+      <p id="token-result" class="token-result"></p>
+    </div>
+  </section>
+
+  <!-- ── Activity feed ── -->
+  <section class="card">
+    <div class="section-header">
+      <h2 class="section-title">Recent Activity</h2>
+      <span id="last-scan" class="last-scan">—</span>
+    </div>
+    <div id="activity-feed" class="activity-feed">
+      <div class="activity-empty">Waiting for first scan…</div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

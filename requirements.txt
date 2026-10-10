@@ -1,0 +1,34 @@
+# Core HTTP
+requests==2.31.0
+
+# Outlook login (browser automation — used once per session for cookie extraction)
+playwright==1.40.0
+
+# Web dashboard
+flask==3.0.0
+
+# Environment config management
+python-dotenv==1.0.0
+
+# 2-minute scheduling loop
+schedule==1.2.1
+
+# Windows desktop notifications
+plyer==2.1.0
+
+# Windows system tray icon
+pystray==0.19.5
+Pillow==10.1.0
+
+# EXE packaging (dev only)
+pyinstaller==6.1.0
+
+# Date handling
+python-dateutil==2.8.2
+
+# Testing
+pytest==7.4.3
+pytest-mock==3.12.0
+
+# Code quality
+ruff==0.1.6

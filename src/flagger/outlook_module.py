@@ -1,0 +1,395 @@
+"""
+outlook_module.py — Microsoft Outlook OWA API client.
+
+All email read and flag operations go through the Exchange Web Services (EWS)
+OWA API endpoint (service.svc). No browser is used during normal operation.
+
+Playwright is used ONLY at startup to log in and extract session cookies.
+Those cookies are then used for all subsequent HTTP requests.
+
+Confirmed API endpoints (discovered via F12 Network inspection):
+  POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=FindItem
+  POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=UpdateItem
+  POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=GetItem
+
+Auth: Microsoft session cookies extracted by Playwright from the browser profile.
+"""
+import re
+import time
+import threading
+import requests
+from pathlib import Path
+
+OWA_BASE = "https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc"
+REQUEST_TIMEOUT = 30
+MAX_RETRIES = 3
+RETRY_DELAY = 5
+
+# Thread-safe session state
+_cookies: dict = {}
+_cookies_lock = threading.Lock()
+_session_status: str = "UNKNOWN"  # UNKNOWN | ACTIVE | EXPIRED
+
+
+class OutlookSessionExpiredError(Exception):
+    """Raised when Outlook detects the SSO session has expired."""
+
+
+class OutlookNetworkError(Exception):
+    """Raised when Outlook OWA is unreachable after retries."""
+
+
+class OutlookAPIError(Exception):
+    """Raised when OWA returns an unexpected response format."""
+
+
+# ── Session cookie management ─────────────────────────────────────────────────
+
+def get_session_status() -> str:
+    return _session_status
+
+
+def _set_cookies(new_cookies: dict):
+    global _session_status
+    with _cookies_lock:
+        _cookies.clear()
+        _cookies.update(new_cookies)
+        _session_status = "ACTIVE"
+
+
+def _mark_expired():
+    global _session_status
+    _session_status = "EXPIRED"
+
+
+def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> dict:
+    """
+    Open Outlook Web using Playwright and extract session cookies.
+    The browser profile preserves the "Keep me signed in" session.
+
+    Returns dict of cookies ready for use in requests.
+    Raises OutlookSessionExpiredError if the session has expired (login page shown).
+    """
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+
+    profile_path = str(Path(browser_profile_dir).resolve())
+
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=profile_path,
+            headless=False,
+            args=["--start-minimized", "--no-sandbox"],
+        )
+        try:
+            page = context.new_page()
+            page.goto(mailbox_url, wait_until="domcontentloaded", timeout=30_000)
+
+            # Give the page time to settle / redirect
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except PlaywrightTimeout:
+                pass  # Timeout is okay — we just check the URL
+
+            url = page.url
+            if any(d in url for d in (
+                "microsoftonline.com", "login.microsoft.com",
+                "login.live.com", "account.microsoft.com"
+            )):
+                raise OutlookSessionExpiredError(
+                    "Outlook session has expired. "
+                    "Please re-login via the dashboard Re-login button."
+                )
+
+            cookies = context.cookies()
+            return {c["name"]: c["value"] for c in cookies}
+
+        except OutlookSessionExpiredError:
+            raise
+        except Exception as exc:
+            raise OutlookNetworkError(f"Playwright error during login: {exc}") from exc
+        finally:
+            context.close()
+
+
+def initialize_session(mailbox_url: str, browser_profile_dir: str):
+    """Extract cookies via Playwright and store them. Call once at bot startup."""
+    cookies = get_cookies_via_playwright(mailbox_url, browser_profile_dir)
+    _set_cookies(cookies)
+
+
+# ── OWA API request helper ────────────────────────────────────────────────────
+
+def _post(action: str, body: dict, attempt: int = 1) -> dict:
+    """POST to the OWA service.svc endpoint with the given action and body."""
+    url = f"{OWA_BASE}?action={action}&app=Mail&n=1"
+    with _cookies_lock:
+        cookies = dict(_cookies)
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
+        "X-OWA-CANARY": cookies.get("X-OWA-CANARY", ""),
+    }
+
+    try:
+        resp = requests.post(
+            url, json=body, cookies=cookies,
+            headers=headers, timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+
+        # Redirect to login = session expired
+        if resp.status_code in (301, 302, 303):
+            _mark_expired()
+            raise OutlookSessionExpiredError(
+                f"Outlook session expired: HTTP {resp.status_code} redirect to login."
+            )
+
+        # Try JSON parse — failure usually means we got a login page HTML
+        try:
+            data = resp.json()
+        except Exception:
+            if any(kw in resp.text.lower() for kw in ("microsoftonline", "login", "sign in")):
+                _mark_expired()
+                raise OutlookSessionExpiredError(
+                    "Outlook session expired: received login HTML instead of JSON."
+                )
+            raise OutlookAPIError(
+                f"Invalid JSON from {action}: {resp.text[:200]}"
+            )
+
+        return data
+
+    except (OutlookSessionExpiredError, OutlookAPIError):
+        raise
+
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+            return _post(action, body, attempt + 1)
+        raise OutlookNetworkError(
+            f"{action} network error after {MAX_RETRIES} attempts: {exc}"
+        )
+
+    except requests.RequestException as exc:
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+            return _post(action, body, attempt + 1)
+        raise OutlookNetworkError(
+            f"{action} request failed after {MAX_RETRIES} attempts: {exc}"
+        )
+
+
+# ── FindItem — read inbox emails ──────────────────────────────────────────────
+
+def find_unflagged_fedex_emails(sender_filter: str) -> list[dict]:
+    """
+    Fetch all unflagged emails from the specified sender in the inbox.
+
+    Returns list of dicts:
+        {
+            "tracking_number": str,
+            "item_id": str,
+            "change_key": str,
+            "received_at": str,
+        }
+
+    Raises: OutlookSessionExpiredError, OutlookNetworkError, OutlookAPIError
+    """
+    body = {
+        "Header": {
+            "RequestServerVersion": "V2018_01_08",
+            "TimeZoneContext": {"TimeZoneDefinition": {"Id": "UTC"}},
+        },
+        "Body": {
+            "__type": "FindItemRequest:#Exchange",
+            "ItemShape": {
+                "BaseShape": "IdOnly",
+                "AdditionalProperties": [
+                    {"__type": "PropertyUri:#Exchange", "FieldURI": "message:Sender"},
+                    {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Subject"},
+                    {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Flag"},
+                    {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Preview"},
+                    {"__type": "PropertyUri:#Exchange", "FieldURI": "item:DateTimeReceived"},
+                ],
+            },
+            "Paging": {
+                "__type": "IndexedPageView:#Exchange",
+                "BasePoint": "Beginning",
+                "Offset": 0,
+                "MaxEntriesReturned": 150,
+            },
+            "Restriction": {
+                "__type": "IsEqualTo:#Exchange",
+                "FieldURI": {"FieldURI": "message:Sender"},
+                "FieldURIOrConstant": {
+                    "Constant": {"Value": sender_filter}
+                },
+            },
+            "ParentFolderIds": [
+                {"__type": "DistinguishedFolderId:#Exchange", "Id": "inbox"}
+            ],
+            "Traversal": "Shallow",
+        },
+    }
+
+    data = _post("FindItem", body)
+
+    try:
+        items = (
+            data["Body"]["ResponseMessages"]["Items"][0]
+            ["RootFolder"]["Items"]
+        )
+    except (KeyError, IndexError, TypeError) as exc:
+        raise OutlookAPIError(
+            f"Unexpected FindItem response structure: {exc}. "
+            f"Response: {str(data)[:200]}"
+        )
+
+    emails = []
+    for item in items:
+        try:
+            # Skip already-flagged emails
+            if item.get("Flag", {}).get("FlagStatus") == "Flagged":
+                continue
+
+            preview = item.get("Preview", "")
+            tracking = _extract_tracking_number(preview)
+            if not tracking:
+                continue  # No tracking number found — skip silently
+
+            emails.append({
+                "tracking_number": tracking,
+                "item_id": item["ItemId"]["Id"],
+                "change_key": item["ItemId"]["ChangeKey"],
+                "received_at": item.get("DateTimeReceived", ""),
+            })
+        except (KeyError, TypeError):
+            continue  # Skip malformed entries
+
+    return emails
+
+
+def _extract_tracking_number(preview: str) -> str | None:
+    """Extract the FedEx tracking number from the email Preview field using regex."""
+    match = re.search(r"Tracking Number:\s+(\d+)", preview)
+    return match.group(1) if match else None
+
+
+# ── UpdateItem — flag an email ────────────────────────────────────────────────
+
+def flag_email(item_id: str, change_key: str, dry_run: bool = False) -> dict:
+    """
+    Add a red flag to an email via the UpdateItem OWA API.
+
+    Args:
+        item_id: ItemId.Id from FindItem response
+        change_key: ItemId.ChangeKey from FindItem response
+        dry_run: If True, log the action but do not actually flag
+
+    Returns:
+        {
+            "success": bool,
+            "new_change_key": str,   # Updated ChangeKey after successful flag
+            "error_code": str | None,
+            "dry_run": bool,
+        }
+    """
+    if dry_run:
+        return {
+            "success": True,
+            "new_change_key": change_key,
+            "error_code": None,
+            "dry_run": True,
+        }
+
+    body = {
+        "Header": {"RequestServerVersion": "V2018_01_08"},
+        "Body": {
+            "__type": "UpdateItemRequest:#Exchange",
+            "ItemChanges": [
+                {
+                    "__type": "ItemChange:#Exchange",
+                    "ItemId": {"Id": item_id, "ChangeKey": change_key},
+                    "Updates": [
+                        {
+                            "__type": "SetItemField:#Exchange",
+                            "Path": {
+                                "__type": "PropertyUri:#Exchange",
+                                "FieldURI": "item:Flag",
+                            },
+                            "Item": {
+                                "__type": "Message:#Exchange",
+                                "Flag": {"FlagStatus": "Flagged"},
+                            },
+                        }
+                    ],
+                }
+            ],
+            "ConflictResolution": "AutoResolve",
+            "MessageDisposition": "SaveOnly",
+        },
+    }
+
+    data = _post("UpdateItem", body)
+
+    try:
+        msg = data["Body"]["ResponseMessages"]["Items"][0]
+        code = msg.get("ResponseCode", "")
+        cls = msg.get("ResponseClass", "")
+
+        if cls == "Success" and code == "NoError":
+            new_ck = (
+                msg.get("Items", [{}])[0]
+                .get("ItemId", {})
+                .get("ChangeKey", change_key)
+            )
+            return {
+                "success": True,
+                "new_change_key": new_ck,
+                "error_code": None,
+                "dry_run": False,
+            }
+
+        return {
+            "success": False,
+            "new_change_key": change_key,
+            "error_code": code or "UnknownError",
+            "dry_run": False,
+        }
+
+    except (KeyError, IndexError, TypeError) as exc:
+        return {
+            "success": False,
+            "new_change_key": change_key,
+            "error_code": f"ParseError:{exc}",
+            "dry_run": False,
+        }
+
+
+# ── GetItem — fetch fresh ChangeKey ──────────────────────────────────────────
+
+def get_item_change_key(item_id: str) -> str | None:
+    """
+    Fetch the current ChangeKey for an email.
+    Used when UpdateItem fails with ErrorChangeKeyRequired — the ChangeKey
+    changed because someone else modified the email between FindItem and UpdateItem.
+
+    Returns the new ChangeKey, or None if the item no longer exists.
+    """
+    body = {
+        "Header": {"RequestServerVersion": "V2018_01_08"},
+        "Body": {
+            "__type": "GetItemRequest:#Exchange",
+            "ItemShape": {"BaseShape": "IdOnly"},
+            "ItemIds": [{"__type": "ItemId:#Exchange", "Id": item_id}],
+        },
+    }
+
+    try:
+        data = _post("GetItem", body)
+        return (
+            data["Body"]["ResponseMessages"]["Items"][0]
+            ["Items"][0]["ItemId"]["ChangeKey"]
+        )
+    except (KeyError, IndexError, TypeError, OutlookAPIError):
+        return None

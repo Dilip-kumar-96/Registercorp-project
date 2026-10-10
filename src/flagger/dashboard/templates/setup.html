@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Setup — FedEx Flagger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="setup-body">
+
+<div class="setup-container">
+
+  <div class="setup-header">
+    <div class="logo-large">🚩</div>
+    <h1 class="setup-title">FedEx Flagger</h1>
+    <p class="setup-sub">Let's get you set up in 3 quick steps</p>
+  </div>
+
+  <!-- Step indicators -->
+  <div class="step-indicators">
+    <div id="ind-1" class="step-ind active"><span>1</span><label>Portal Token</label></div>
+    <div class="step-connector"></div>
+    <div id="ind-2" class="step-ind"><span>2</span><label>Outlook Login</label></div>
+    <div class="step-connector"></div>
+    <div id="ind-3" class="step-ind"><span>3</span><label>Start Bot</label></div>
+  </div>
+
+  <!-- ── Step 1: Portal Token ── -->
+  <div id="step-1" class="setup-step active">
+    <div class="card">
+      <h2 class="section-title">Step 1 — Portal API Token</h2>
+      <div class="setup-instructions">
+        <p>The bot needs a token to check prior notice statuses on the Registrar Admin portal.</p>
+        <ol class="instruction-list">
+          <li>Open <a href="https://tools.registrarcorp.com" target="_blank" class="link">tools.registrarcorp.com</a> and log in</li>
+          <li>Press <kbd>F12</kbd> to open Developer Tools → click <strong>Network</strong> tab</li>
+          <li>Click <strong>Fetch/XHR</strong> filter → click any request in the list</li>
+          <li>Look at the <strong>Request URL</strong> — copy the value after <code>token=</code></li>
+        </ol>
+      </div>
+      <div class="token-input-row">
+        <input id="setup-token-input" class="input" type="text" placeholder="Paste your portal token here…" />
+        <button class="btn btn-ghost" onclick="setupTestToken()">Test</button>
+      </div>
+      <p id="setup-token-result" class="token-result"></p>
+      <div class="step-actions">
+        <button id="step1-next" class="btn btn-green btn-lg" onclick="step1Next()" disabled>
+          Next → Connect Outlook
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Outlook Login ── -->
+  <div id="step-2" class="setup-step" style="display:none">
+    <div class="card">
+      <h2 class="section-title">Step 2 — Connect Outlook</h2>
+      <p class="setup-desc">
+        The bot needs to log in to the shared Outlook mailbox once to get session access.
+        A browser window will open — log in and check <strong>"Keep me signed in"</strong>.
+        The window will close automatically.
+      </p>
+      <div class="outlook-connect-area" id="outlook-connect-area">
+        <button class="btn btn-blue btn-lg" onclick="setupRelogin()">
+          🔑 Open Outlook Login Window
+        </button>
+      </div>
+      <div id="outlook-status-area" class="outlook-status-area" style="display:none">
+        <div id="outlook-status-msg" class="outlook-waiting">⏳ Waiting for login…</div>
+      </div>
+      <div class="step-actions">
+        <button class="btn btn-ghost" onclick="goToStep(1)">← Back</button>
+        <button id="step2-next" class="btn btn-green btn-lg" onclick="step2Next()" disabled>
+          Next → Start Bot
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Ready ── -->
+  <div id="step-3" class="setup-step" style="display:none">
+    <div class="card">
+      <h2 class="section-title">Step 3 — Ready!</h2>
+      <div class="ready-checklist">
+        <div class="check-item check-ok">✅ Portal token saved and verified</div>
+        <div class="check-item check-ok">✅ Outlook session connected</div>
+        <div class="check-item check-info">
+          🟡 Dry run mode is <strong>ON</strong> — the bot will log decisions but not actually flag emails.
+          <br/>Run for one full shift to verify, then disable via Settings.
+        </div>
+      </div>
+      <div class="step-actions">
+        <button class="btn btn-ghost" onclick="goToStep(2)">← Back</button>
+        <button class="btn btn-green btn-lg" onclick="startBotAndGo()">▶ Start Bot</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let tokenVerified = false;
+let outlookConnected = false;
+
+function goToStep(n) {
+  document.querySelectorAll('.setup-step').forEach(s => s.style.display = 'none');
+  document.getElementById(`step-${n}`).style.display = 'block';
+  document.querySelectorAll('.step-ind').forEach((el, i) => {
+    el.classList.toggle('active', i + 1 === n);
+    el.classList.toggle('done', i + 1 < n);
+  });
+}
+
+async function setupTestToken() {
+  const token = document.getElementById('setup-token-input').value.trim();
+  const result = document.getElementById('setup-token-result');
+  if (!token) { result.textContent = '⚠ Please paste a token first.'; result.className = 'token-result error'; return; }
+  result.textContent = '⏳ Testing…'; result.className = 'token-result';
+  const res = await fetch('/api/token/test', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });
+  const data = await res.json();
+  if (data.valid) {
+    result.textContent = '✅ ' + data.message; result.className = 'token-result success';
+    // Save token
+    await fetch('/api/token/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });
+    tokenVerified = true;
+    document.getElementById('step1-next').disabled = false;
+  } else {
+    result.textContent = '❌ ' + data.message; result.className = 'token-result error';
+    tokenVerified = false;
+    document.getElementById('step1-next').disabled = true;
+  }
+}
+
+function step1Next() {
+  if (!tokenVerified) return;
+  goToStep(2);
+}
+
+async function setupRelogin() {
+  document.getElementById('outlook-connect-area').style.display = 'none';
+  document.getElementById('outlook-status-area').style.display = 'block';
+  const msg = document.getElementById('outlook-status-msg');
+  msg.textContent = '⏳ Opening browser window… please log in to pn@registrarcorp.com and check "Keep me signed in".';
+  msg.className = 'outlook-waiting';
+
+  const res = await fetch('/api/relogin', { method: 'POST' });
+  // Poll outlook status every 3 seconds
+  const poll = setInterval(async () => {
+    const s = await fetch('/api/status').then(r => r.json());
+    if (s.outlook_status === 'ACTIVE') {
+      clearInterval(poll);
+      msg.textContent = '✅ Outlook connected successfully!';
+      msg.className = 'outlook-success';
+      outlookConnected = true;
+      document.getElementById('step2-next').disabled = false;
+    }
+  }, 3000);
+  // Timeout after 2 minutes
+  setTimeout(() => clearInterval(poll), 120000);
+}
+
+function step2Next() {
+  goToStep(3);
+}
+
+async function startBotAndGo() {
+  await fetch('/api/bot/start', { method: 'POST' });
+  window.location.href = '/';
+}
+</script>
+</body>
+</html>

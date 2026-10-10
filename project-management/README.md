@@ -1,13 +1,9 @@
-# Fresh Laptop Setup & Installation Guide
-
-> **Target Audience:** Any team member or operator setting up the FedEx Email Auto-Flagger on a fresh Windows work laptop. No developer knowledge or command-line experience required.
-
----
+# Installation Guide
 
 ## Quick Setup Summary (5-Minute Overview)
 
 1. **Install Python 3.12** (ensure "Add python.exe to PATH" is checked).
-2. **Download or copy `FedExFlagger.exe`** to your laptop (e.g. `C:\FedExFlagger\`).
+2. **Download or copy `FedExFlagger.exe`** to your system (e.g. `C:\FedExFlagger\`).
 3. **Double-click `FedExFlagger.exe`** — opens `http://localhost:5000` in your browser.
 4. **Complete the 3-step Setup Wizard** (Paste Portal Token &rarr; Log in to Outlook &rarr; Start Bot).
 5. Look for the red flag icon (**🚩**) in your Windows system tray. The bot is now running!
@@ -38,7 +34,7 @@ The bot engine requires Python 3.12+ runtime on Windows.
 ### Step 2: Download & Place the Application
 
 1. Download the latest `FedExFlagger.exe` (or obtain the folder from your team's shared drive / GitHub Releases).
-2. Create a dedicated folder on your laptop, for example:
+2. Create a dedicated folder on your system, for example:
    ```
    C:\FedExFlagger\
    ```

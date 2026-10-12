@@ -28,9 +28,9 @@ def build():
     # Ensure PyInstaller is installed
     try:
         import PyInstaller
-        print(f"  PyInstaller {PyInstaller.__version__} found ✓")
+        print(f"  PyInstaller {PyInstaller.__version__} found [OK]")
     except ImportError:
-        print("  Installing PyInstaller…")
+        print("  Installing PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller==6.1.0"])
 
     cmd = [
@@ -64,19 +64,19 @@ def build():
     if icon_path.exists():
         cmd += ["--icon", str(icon_path)]
 
-    print(f"\n  Running PyInstaller…\n")
+    print("\n  Running PyInstaller...\n")
     result = subprocess.run(cmd, cwd=str(ROOT))
 
     if result.returncode == 0:
         exe = DIST / "FedExFlagger.exe"
         size_mb = exe.stat().st_size / 1_048_576 if exe.exists() else 0
         print(f"\n{'=' * 56}")
-        print(f"  ✅ Build successful!")
+        print("  Build successful!")
         print(f"  Output: {exe}")
         print(f"  Size:   {size_mb:.1f} MB")
         print(f"{'=' * 56}")
     else:
-        print(f"\n  ❌ Build failed (exit code {result.returncode})")
+        print(f"\n  Build failed (exit code {result.returncode})")
         sys.exit(1)
 
 

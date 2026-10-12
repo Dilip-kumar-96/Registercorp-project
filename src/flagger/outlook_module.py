@@ -128,6 +128,7 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
         "Content-Type": "application/json; charset=utf-8",
         "Accept": "application/json",
         "X-OWA-CANARY": cookies.get("X-OWA-CANARY", ""),
+        "action": action,
     }
 
     try:
@@ -309,7 +310,7 @@ def flag_email(item_id: str, change_key: str, dry_run: bool = False) -> dict:
             "ItemChanges": [
                 {
                     "__type": "ItemChange:#Exchange",
-                    "ItemId": {"Id": item_id, "ChangeKey": change_key},
+                    "ItemId": {"__type": "ItemId:#Exchange", "Id": item_id, "ChangeKey": change_key},
                     "Updates": [
                         {
                             "__type": "SetItemField:#Exchange",

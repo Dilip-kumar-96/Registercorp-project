@@ -290,13 +290,6 @@ def find_unflagged_fedex_emails(sender_filter: str) -> list[dict]:
                 "Offset": 0,
                 "MaxEntriesReturned": 150,
             },
-            "Restriction": {
-                "__type": "IsEqualTo:#Exchange",
-                "FieldURI": {"FieldURI": "message:Sender"},
-                "FieldURIOrConstant": {
-                    "Constant": {"Value": sender_filter}
-                },
-            },
             "ParentFolderIds": [
                 {"__type": "DistinguishedFolderId:#Exchange", "Id": "inbox"}
             ],
@@ -323,6 +316,17 @@ def find_unflagged_fedex_emails(sender_filter: str) -> list[dict]:
             # Skip already-flagged emails
             if item.get("Flag", {}).get("FlagStatus") == "Flagged":
                 continue
+
+            # In-memory sender filter if Sender field is present
+            if sender_filter:
+                sender_addr = (
+                    item.get("Sender", {})
+                    .get("Mailbox", {})
+                    .get("EmailAddress", "")
+                    .lower()
+                )
+                if sender_addr and sender_filter.lower() not in sender_addr:
+                    continue
 
             preview = item.get("Preview", "")
             tracking = _extract_tracking_number(preview)

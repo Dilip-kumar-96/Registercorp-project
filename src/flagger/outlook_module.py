@@ -137,19 +137,40 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
 
             # Check if we got redirected to a login page
             url = page.url
-            if any(d in url for d in (
+            LOGIN_DOMAINS = (
                 "microsoftonline.com", "login.microsoft.com",
-                "login.live.com", "account.microsoft.com"
-            )):
-                raise OutlookSessionExpiredError(
-                    "Outlook session has expired. "
-                    "Please re-login via the dashboard Re-login button."
-                )
+                "login.live.com", "account.microsoft.com",
+            )
+            if any(d in url for d in LOGIN_DOMAINS):
+                # Profile is new OR session is expired — user must log in manually.
+                # Wait patiently (up to 3 minutes) for them to complete the login.
+                print("  [Playwright] Login page detected — please log in to Outlook in the browser window.")
+                print("  [Playwright] Waiting up to 3 minutes for you to complete login...")
+                LOGIN_TIMEOUT_MS = 180_000  # 3 minutes
+                try:
+                    # Wait until the URL leaves the login domain (= login complete)
+                    page.wait_for_url(
+                        lambda u: not any(d in u for d in LOGIN_DOMAINS),
+                        timeout=LOGIN_TIMEOUT_MS,
+                    )
+                    # Give OWA time to load after redirect
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=15_000)
+                    except PlaywrightTimeout:
+                        pass
+                    print("  [Playwright] Login completed! Capturing session...")
+                except PlaywrightTimeout:
+                    # User did not log in within 3 minutes
+                    raise OutlookSessionExpiredError(
+                        "Login timed out — the browser was open for 3 minutes but no login was detected. "
+                        "Please try again."
+                    )
 
             # ── Wait for Bearer token from passive interception ─────────────────
             # Give it up to TOKEN_WAIT_SECONDS for a real service.svc call to fire
             if not captured["auth"]:
                 token_event.wait(timeout=TOKEN_WAIT_SECONDS)
+
 
             # ── Fallback: Deep MSAL localStorage/sessionStorage scan ────────────
             if not captured["auth"]:

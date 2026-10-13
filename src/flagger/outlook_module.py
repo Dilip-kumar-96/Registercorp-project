@@ -49,10 +49,22 @@ def get_session_status() -> str:
     return _session_status
 
 
+_auth_token: str = ""
+
+
+def _set_auth_token(token: str):
+    global _auth_token
+    with _cookies_lock:
+        _auth_token = token
+
+
 def _set_cookies(new_cookies: dict):
-    global _session_status
+    global _session_status, _auth_token
     with _cookies_lock:
         _cookies.clear()
+        auth = new_cookies.pop("_AUTH_HEADER", None)
+        if auth:
+            _auth_token = auth
         _cookies.update(new_cookies)
         _session_status = "ACTIVE"
 
@@ -82,7 +94,6 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
             args=["--start-minimized", "--no-sandbox"],
         )
         try:
-            page = context.new_page()
             captured = {"auth": os.getenv("OUTLOOK_AUTH_TOKEN", "")}
 
             def on_request(req):
@@ -90,7 +101,10 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
                 if auth and auth.startswith("Bearer "):
                     captured["auth"] = auth
 
-            page.on("request", on_request)
+            # Listen on context so all frames, workers, and background requests are captured
+            context.on("request", on_request)
+
+            page = context.new_page()
             page.goto(mailbox_url, wait_until="domcontentloaded", timeout=30_000)
 
             # Give the page time to settle / redirect
@@ -109,17 +123,28 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
                     "Please re-login via the dashboard Re-login button."
                 )
 
-            # Check sessionStorage if token was not captured from request headers
+            # Small settle pause to let any background service.svc calls complete
+            if not captured["auth"]:
+                time.sleep(3)
+
+            # Search sessionStorage and localStorage for any MSAL token or JWT
             if not captured["auth"]:
                 try:
                     tok = page.evaluate("""() => {
-                        for (let i = 0; i < sessionStorage.length; i++) {
-                            const k = sessionStorage.key(i);
-                            if (k && k.toLowerCase().includes("accesstoken")) {
-                                try {
-                                    const val = JSON.parse(sessionStorage.getItem(k));
-                                    if (val && val.secret) return "Bearer " + val.secret;
-                                } catch(e) {}
+                        for (const storage of [sessionStorage, localStorage]) {
+                            for (let i = 0; i < storage.length; i++) {
+                                const k = storage.key(i);
+                                const val = storage.getItem(k);
+                                if (val && val.includes("eyJ")) {
+                                    try {
+                                        const parsed = JSON.parse(val);
+                                        if (parsed.secret && parsed.secret.startsWith("eyJ")) return "Bearer " + parsed.secret;
+                                        if (parsed.credential && parsed.credential.startsWith("eyJ")) return "Bearer " + parsed.credential;
+                                        if (parsed.accessToken && parsed.accessToken.startsWith("eyJ")) return "Bearer " + parsed.accessToken;
+                                    } catch(e) {
+                                        if (val.startsWith("eyJ")) return "Bearer " + val;
+                                    }
+                                }
                             }
                         }
                         return "";
@@ -156,8 +181,11 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
     url = f"{OWA_BASE}?action={action}&app=Mail&n=1"
     with _cookies_lock:
         cookies = dict(_cookies)
+        auth = _auth_token
 
-    auth_header = cookies.pop("_AUTH_HEADER", None) or os.getenv("OUTLOOK_AUTH_TOKEN", "")
+    auth_header = auth or os.getenv("OUTLOOK_AUTH_TOKEN", "")
+    if auth_header and not auth_header.startswith("Bearer "):
+        auth_header = f"Bearer {auth_header}"
 
     headers = {
         "Content-Type": "application/json; charset=utf-8",

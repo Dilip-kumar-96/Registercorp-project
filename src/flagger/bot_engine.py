@@ -323,9 +323,19 @@ def _phase3_flag():
             continue
 
         if result["success"]:
-            database.update_status(tracking, "FLAGGED")
-            if result.get("new_change_key"):
-                database.update_change_key(tracking, result["new_change_key"])
+            if not dry_run:
+                # Only mark FLAGGED in DB after a real flag (not dry run).
+                # Dry run must leave status as CONFIRMED so the next live cycle
+                # can actually perform the flag.
+                database.update_status(tracking, "FLAGGED")
+                if result.get("new_change_key"):
+                    database.update_change_key(tracking, result["new_change_key"])
+            else:
+                # Dry run: refresh ChangeKey from Outlook so it stays fresh
+                # for when the real flag runs later.
+                fresh_ck = outlook_module.get_item_change_key(item_id)
+                if fresh_ck and fresh_ck != change_key:
+                    database.update_change_key(tracking, fresh_ck)
 
             label = "DRY_FLAGGED" if dry_run else "FLAGGED"
             session_logger.log("info", label, tracking=tracking)
@@ -345,20 +355,29 @@ def _phase3_flag():
                 database.log_activity("warning", "EMAIL_GONE", tracking=tracking,
                                       detail="Deleted before flagging")
 
-            elif error_code == "ErrorChangeKeyRequired":
-                # Email was modified by someone else — fetch fresh ChangeKey and retry
-                session_logger.log("warning", "CHANGEKEY_MISMATCH", tracking=tracking)
+            elif error_code in ("ErrorChangeKeyRequired", "ErrorIrresolvableConflict"):
+                # ChangeKey is stale — either someone else modified the email
+                # (ErrorChangeKeyRequired) or there was a sync conflict
+                # (ErrorIrresolvableConflict). Both are fixed the same way:
+                # fetch the fresh ChangeKey via GetItem and retry the flag.
+                session_logger.log("warning", "CHANGEKEY_MISMATCH",
+                                   tracking=tracking, reason=error_code)
                 new_ck = outlook_module.get_item_change_key(item_id)
                 if new_ck:
                     retry = outlook_module.flag_email(item_id, new_ck, dry_run=dry_run)
                     if retry["success"]:
-                        database.update_status(tracking, "FLAGGED")
-                        database.update_change_key(
-                            tracking, retry.get("new_change_key", new_ck)
-                        )
-                        session_logger.log("info", "FLAGGED_AFTER_RETRY", tracking=tracking)
-                        database.log_activity("info", "FLAGGED", tracking=tracking,
-                                              detail="After ChangeKey retry")
+                        if not dry_run:
+                            database.update_status(tracking, "FLAGGED")
+                            database.update_change_key(
+                                tracking, retry.get("new_change_key", new_ck)
+                            )
+                        else:
+                            database.update_change_key(tracking, new_ck)
+                        label = "FLAGGED_AFTER_RETRY" if not dry_run else "DRY_FLAGGED_AFTER_RETRY"
+                        session_logger.log("info", label, tracking=tracking)
+                        database.log_activity("info", "FLAGGED" if not dry_run else "DRY_RUN_WOULD_FLAG",
+                                              tracking=tracking,
+                                              detail="After ChangeKey refresh")
                     else:
                         _mark_error(tracking, f"Retry failed: {retry.get('error_code')}")
                 else:

@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .or-divider { display:flex; align-items:center; gap:0.7rem; margin:1.2rem 0; color:var(--text-muted,#8899aa); font-size:0.85rem; }
+    .or-divider::before, .or-divider::after { content:''; flex:1; height:1px; background:var(--border,#2a3047); }
+    .manual-token-section { background:rgba(79,142,247,0.06); border:1px solid rgba(79,142,247,0.2); border-radius:10px; padding:1rem 1.2rem; margin-top:0.5rem; }
+    .manual-token-section .field-label { font-size:0.83rem; font-weight:600; color:var(--text,#e2e8f0); margin-bottom:0.35rem; display:block; }
+    .manual-token-section .field-hint { font-size:0.77rem; color:var(--text-muted,#8899aa); margin-bottom:0.5rem; }
+    .skip-link { font-size:0.83rem; color:var(--text-muted,#8899aa); text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; }
+    .skip-link:hover { color:var(--accent,#4f8ef7); }
+    .howto-mini { font-size:0.8rem; color:var(--text-muted,#8899aa); line-height:1.7; margin:0.6rem 0 0 0; padding-left:1.1rem; }
+    .howto-mini li { margin-bottom:0.1rem; }
+    code { background:rgba(79,142,247,0.12); color:var(--accent,#4f8ef7); padding:0.1rem 0.35rem; border-radius:4px; font-size:0.8rem; }
+  </style>
 </head>
 <body class="setup-body">
 
@@ -22,7 +34,7 @@
   <div class="step-indicators">
     <div id="ind-1" class="step-ind active"><span>1</span><label>Portal Token</label></div>
     <div class="step-connector"></div>
-    <div id="ind-2" class="step-ind"><span>2</span><label>Outlook Login</label></div>
+    <div id="ind-2" class="step-ind"><span>2</span><label>Outlook Session</label></div>
     <div class="step-connector"></div>
     <div id="ind-3" class="step-ind"><span>3</span><label>Start Bot</label></div>
   </div>
@@ -53,14 +65,14 @@
     </div>
   </div>
 
-  <!-- ── Step 2: Outlook Login ── -->
+  <!-- ── Step 2: Outlook Session ── -->
   <div id="step-2" class="setup-step" style="display:none">
     <div class="card">
       <h2 class="section-title">Step 2 — Connect Outlook</h2>
+
+      <!-- Option A: Chromium auto-login -->
       <p class="setup-desc">
-        The bot needs to log in to the shared Outlook mailbox once to get session access.
-        A browser window will open — log in and check <strong>"Keep me signed in"</strong>.
-        The window will close automatically.
+        <strong>Option A</strong> — Open a browser window and log in once. The session is saved for future runs.
       </p>
       <div class="outlook-connect-area" id="outlook-connect-area">
         <button class="btn btn-blue btn-lg" onclick="setupRelogin()">
@@ -70,10 +82,46 @@
       <div id="outlook-status-area" class="outlook-status-area" style="display:none">
         <div id="outlook-status-msg" class="outlook-waiting">⏳ Waiting for login…</div>
       </div>
-      <div class="step-actions">
+
+      <!-- Option B: Manual token paste -->
+      <div class="or-divider">or</div>
+
+      <p class="setup-desc">
+        <strong>Option B</strong> — Already logged into Outlook in Chrome? Paste the Bearer token directly.
+        <details style="margin-top:0.5rem;">
+          <summary style="cursor:pointer; color:var(--accent,#4f8ef7); font-size:0.83rem; font-weight:600;">How to get the token from Chrome (click)</summary>
+          <ul class="howto-mini">
+            <li>Open Chrome → go to <code>https://outlook.cloud.microsoft/mail/pn@registrarcorp.com/</code></li>
+            <li>Press <kbd>F12</kbd> → <strong>Network</strong> tab → filter by <code>service.svc</code></li>
+            <li>Click any <code>service.svc</code> request → <strong>Headers</strong> → copy <code>Authorization</code> value</li>
+            <li><em>Optional:</em> Go to <strong>Application</strong> → Cookies → copy <code>X-OWA-CANARY</code></li>
+          </ul>
+        </details>
+      </p>
+
+      <div class="manual-token-section">
+        <label class="field-label" for="setup-bearer">Bearer Token <span style="color:#ef4444">*</span></label>
+        <p class="field-hint">From F12 → Network → service.svc → Request Headers → Authorization</p>
+        <input id="setup-bearer" class="input" type="text" placeholder="Bearer eyJhbGciOiJSUzI1NiIs…" style="font-family:monospace;font-size:0.82rem;margin-bottom:0.7rem;" />
+
+        <label class="field-label" for="setup-canary">X-OWA-CANARY <span style="font-weight:400; color:var(--text-muted,#8899aa)">(optional)</span></label>
+        <p class="field-hint">From F12 → Application → Cookies → X-OWA-CANARY</p>
+        <input id="setup-canary" class="input" type="text" placeholder="Optional" style="font-family:monospace;font-size:0.82rem;margin-bottom:0.8rem;" />
+
+        <div style="display:flex;gap:0.7rem;align-items:center;">
+          <button class="btn btn-ghost" id="btn-test-manual" onclick="setupTestManual()">🧪 Test Token</button>
+          <button class="btn btn-green" id="btn-save-manual" onclick="setupSaveManual()">💾 Save &amp; Apply</button>
+        </div>
+        <p id="setup-manual-result" class="token-result" style="margin-top:0.5rem;"></p>
+      </div>
+
+      <div class="step-actions" style="margin-top:1.2rem;">
         <button class="btn btn-ghost" onclick="goToStep(1)">← Back</button>
         <button id="step2-next" class="btn btn-green btn-lg" onclick="step2Next()" disabled>
           Next → Start Bot
+        </button>
+        <button class="skip-link" onclick="skipOutlookStep()" title="You can add the Outlook token later from Settings">
+          Skip for now →
         </button>
       </div>
     </div>
@@ -85,12 +133,15 @@
       <h2 class="section-title">Step 3 — Ready!</h2>
       <div class="ready-checklist">
         <div class="check-item check-ok">✅ Portal token saved and verified</div>
-        <div class="check-item check-ok">✅ Outlook session connected</div>
+        <div id="outlook-check-item" class="check-item check-ok">✅ Outlook session connected</div>
         <div class="check-item check-info">
           🟡 Dry run mode is <strong>ON</strong> — the bot will log decisions but not actually flag emails.
           <br/>Run for one full shift to verify, then disable via Settings.
         </div>
       </div>
+      <p id="step3-skip-note" style="display:none; color:var(--text-muted,#8899aa); font-size:0.85rem; margin-top:0.8rem;">
+        ⚠ Outlook session was skipped. Go to <a href="/settings" class="link">Settings → Outlook Manual Session</a> to add the Bearer token before starting the bot.
+      </p>
       <div class="step-actions">
         <button class="btn btn-ghost" onclick="goToStep(2)">← Back</button>
         <button class="btn btn-green btn-lg" onclick="startBotAndGo()">▶ Start Bot</button>
@@ -103,6 +154,7 @@
 <script>
 let tokenVerified = false;
 let outlookConnected = false;
+let outlookSkipped = false;
 
 function goToStep(n) {
   document.querySelectorAll('.setup-step').forEach(s => s.style.display = 'none');
@@ -122,7 +174,6 @@ async function setupTestToken() {
   const data = await res.json();
   if (data.valid) {
     result.textContent = '✅ ' + data.message; result.className = 'token-result success';
-    // Save token
     await fetch('/api/token/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });
     tokenVerified = true;
     document.getElementById('step1-next').disabled = false;
@@ -142,10 +193,10 @@ async function setupRelogin() {
   document.getElementById('outlook-connect-area').style.display = 'none';
   document.getElementById('outlook-status-area').style.display = 'block';
   const msg = document.getElementById('outlook-status-msg');
-  msg.textContent = '⏳ Opening browser window… please log in to pn@registrarcorp.com and check "Keep me signed in".';
+  msg.textContent = '⏳ Opening browser window… log in to pn@registrarcorp.com and check "Keep me signed in". The window will stay open until login is complete.';
   msg.className = 'outlook-waiting';
 
-  const res = await fetch('/api/relogin', { method: 'POST' });
+  await fetch('/api/relogin', { method: 'POST' });
   // Poll outlook status every 3 seconds
   const poll = setInterval(async () => {
     const s = await fetch('/api/status').then(r => r.json());
@@ -157,11 +208,65 @@ async function setupRelogin() {
       document.getElementById('step2-next').disabled = false;
     }
   }, 3000);
-  // Timeout after 2 minutes
-  setTimeout(() => clearInterval(poll), 120000);
+  // Clear poll after 6 minutes (5 min wait + buffer)
+  setTimeout(() => clearInterval(poll), 360000);
+}
+
+async function setupTestManual() {
+  const bearer = document.getElementById('setup-bearer').value.trim();
+  const canary = document.getElementById('setup-canary').value.trim();
+  const result = document.getElementById('setup-manual-result');
+  if (!bearer) { result.textContent = '⚠ Paste the Bearer token first.'; result.className = 'token-result error'; return; }
+  result.textContent = '⏳ Testing…'; result.className = 'token-result';
+  document.getElementById('btn-test-manual').disabled = true;
+  try {
+    const res = await fetch('/api/outlook/session/test', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ bearer_token: bearer, owa_canary: canary })
+    });
+    const data = await res.json();
+    result.textContent = data.message;
+    result.className = 'token-result ' + (data.valid ? 'success' : 'error');
+  } finally {
+    document.getElementById('btn-test-manual').disabled = false;
+  }
+}
+
+async function setupSaveManual() {
+  const bearer = document.getElementById('setup-bearer').value.trim();
+  const canary = document.getElementById('setup-canary').value.trim();
+  const result = document.getElementById('setup-manual-result');
+  if (!bearer) { result.textContent = '⚠ Paste the Bearer token first.'; result.className = 'token-result error'; return; }
+  result.textContent = '⏳ Saving…'; result.className = 'token-result';
+  document.getElementById('btn-save-manual').disabled = true;
+  try {
+    const res = await fetch('/api/outlook/session/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ bearer_token: bearer, owa_canary: canary })
+    });
+    const data = await res.json();
+    if (data.success) {
+      result.textContent = '✅ ' + data.message; result.className = 'token-result success';
+      outlookConnected = true;
+      document.getElementById('step2-next').disabled = false;
+    } else {
+      result.textContent = '❌ ' + data.message; result.className = 'token-result error';
+    }
+  } finally {
+    document.getElementById('btn-save-manual').disabled = false;
+  }
 }
 
 function step2Next() {
+  goToStep(3);
+}
+
+function skipOutlookStep() {
+  outlookSkipped = true;
+  document.getElementById('outlook-check-item').textContent = '⚠ Outlook session not set — add via Settings after start';
+  document.getElementById('outlook-check-item').className = 'check-item check-info';
+  document.getElementById('step3-skip-note').style.display = 'block';
+  document.getElementById('step2-next').disabled = false;
   goToStep(3);
 }
 

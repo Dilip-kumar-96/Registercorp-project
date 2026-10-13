@@ -93,7 +93,7 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
     import os
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-    TOKEN_WAIT_SECONDS = 25  # Max seconds to wait for a Bearer token before giving up
+    TOKEN_WAIT_SECONDS = 90  # Max seconds to wait for a Bearer token (if no saved token)
 
     profile_path = str(Path(browser_profile_dir).resolve())
 
@@ -105,9 +105,14 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
             args=["--no-sandbox", "--start-maximized"],
         )
         try:
-            # Start with any previously saved token as fallback baseline
-            captured = {"auth": os.getenv("OUTLOOK_AUTH_TOKEN", "")}
+            # Start with any previously saved token as fallback baseline.
+            # If we already have a working saved token, we only need fresh cookies —
+            # no need to wait 90 seconds for a new Bearer token from OWA.
+            existing_token = os.getenv("OUTLOOK_AUTH_TOKEN", "")
+            captured = {"auth": existing_token}
             token_event = __import__("threading").Event()
+            if existing_token:
+                token_event.set()  # Already have a token — skip the long wait
 
             def on_request(req):
                 """Intercept ANY request that carries a Bearer token."""
@@ -143,10 +148,10 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
             )
             if any(d in url for d in LOGIN_DOMAINS):
                 # Profile is new OR session is expired — user must log in manually.
-                # Wait patiently (up to 3 minutes) for them to complete the login.
+                # Keep browser open for up to 5 minutes for them to complete login.
                 print("  [Playwright] Login page detected — please log in to Outlook in the browser window.")
-                print("  [Playwright] Waiting up to 3 minutes for you to complete login...")
-                LOGIN_TIMEOUT_MS = 180_000  # 3 minutes
+                print("  [Playwright] Waiting up to 5 minutes for you to complete login...")
+                LOGIN_TIMEOUT_MS = 300_000  # 5 minutes
                 try:
                     # Wait until the URL leaves the login domain (= login complete)
                     page.wait_for_url(

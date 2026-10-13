@@ -4,15 +4,16 @@ outlook_module.py — Microsoft Outlook OWA API client.
 All email read and flag operations go through the Exchange Web Services (EWS)
 OWA API endpoint (service.svc). No browser is used during normal operation.
 
-Playwright is used ONLY at startup to log in and extract session cookies.
-Those cookies are then used for all subsequent HTTP requests.
+Playwright is used ONLY at startup to log in and extract session cookies + Bearer token.
+Those cookies and the token are then used for all subsequent HTTP requests.
 
 Confirmed API endpoints (discovered via F12 Network inspection):
   POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=FindItem
   POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=UpdateItem
   POST https://outlook.cloud.microsoft/owa/pn@registrarcorp.com/service.svc?action=GetItem
 
-Auth: Microsoft session cookies extracted by Playwright from the browser profile.
+Auth: Microsoft session cookies + Authorization: Bearer token extracted by Playwright.
+The Bearer token is persisted to .env as OUTLOOK_AUTH_TOKEN for resilience.
 """
 import re
 import time
@@ -76,11 +77,18 @@ def _mark_expired():
 
 def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> dict:
     """
-    Open Outlook Web using Playwright and extract session cookies and auth tokens.
+    Open Outlook Web using Playwright and extract session cookies and Bearer token.
     The browser profile preserves the "Keep me signed in" session.
 
-    Returns dict of cookies (including optional _AUTH_HEADER) ready for use in requests.
-    Raises OutlookSessionExpiredError if the session has expired (login page shown).
+    Strategy:
+    1. Listen for Authorization: Bearer headers on ALL requests (context-level)
+    2. After page load, do a deep MSAL cache search in localStorage/sessionStorage
+    3. Actively trigger an OWA service.svc call via fetch() inside the page
+       to force a Bearer-authenticated request we can intercept
+    4. Persist the captured token back to .env for resilience
+
+    Returns dict of cookies (including _AUTH_HEADER) ready for use in requests.
+    Raises OutlookSessionExpiredError if the session has expired.
     """
     import os
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -94,14 +102,16 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
             args=["--start-minimized", "--no-sandbox"],
         )
         try:
+            # Start with any previously saved token as fallback
             captured = {"auth": os.getenv("OUTLOOK_AUTH_TOKEN", "")}
 
             def on_request(req):
+                """Intercept ANY request that carries a Bearer token."""
                 auth = req.headers.get("authorization")
                 if auth and auth.startswith("Bearer "):
                     captured["auth"] = auth
 
-            # Listen on context so all frames, workers, and background requests are captured
+            # Context-level listener catches ALL frames, workers, service workers
             context.on("request", on_request)
 
             page = context.new_page()
@@ -123,40 +133,98 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
                     "Please re-login via the dashboard Re-login button."
                 )
 
-            # Small settle pause to let any background service.svc calls complete
-            if not captured["auth"]:
-                time.sleep(3)
+            # Wait a moment for background service.svc calls to fire
+            time.sleep(2)
 
-            # Search sessionStorage and localStorage for any MSAL token or JWT
+            # ── Strategy 2: Deep MSAL cache search ─────────────────────────────
             if not captured["auth"]:
                 try:
-                    tok = page.evaluate("""() => {
-                        for (const storage of [sessionStorage, localStorage]) {
-                            for (let i = 0; i < storage.length; i++) {
-                                const k = storage.key(i);
-                                const val = storage.getItem(k);
-                                if (val && val.includes("eyJ")) {
-                                    try {
-                                        const parsed = JSON.parse(val);
-                                        if (parsed.secret && parsed.secret.startsWith("eyJ")) return "Bearer " + parsed.secret;
-                                        if (parsed.credential && parsed.credential.startsWith("eyJ")) return "Bearer " + parsed.credential;
-                                        if (parsed.accessToken && parsed.accessToken.startsWith("eyJ")) return "Bearer " + parsed.accessToken;
-                                    } catch(e) {
-                                        if (val.startsWith("eyJ")) return "Bearer " + val;
+                    tok = page.evaluate("""
+                    () => {
+                        // MSAL stores tokens in localStorage with keys like:
+                        // "<clientId>.<tenantId>-login.windows.net-accesstoken-..."
+                        // Keys may contain "accesstoken", "idtoken", "secret", etc.
+                        const stores = [];
+                        try { stores.push(localStorage); } catch(e) {}
+                        try { stores.push(sessionStorage); } catch(e) {}
+
+                        for (const storage of stores) {
+                            try {
+                                for (let i = 0; i < storage.length; i++) {
+                                    const k = storage.key(i);
+                                    if (!k) continue;
+                                    const val = storage.getItem(k);
+                                    if (!val) continue;
+
+                                    // Direct JWT (rare)
+                                    if (val.startsWith("eyJ") && val.split(".").length === 3) {
+                                        return "Bearer " + val;
+                                    }
+
+                                    // JSON blob containing token
+                                    if (val.includes("eyJ")) {
+                                        try {
+                                            const obj = JSON.parse(val);
+                                            const fields = [
+                                                "secret", "credential", "accessToken",
+                                                "access_token", "token", "value"
+                                            ];
+                                            for (const f of fields) {
+                                                if (obj[f] && typeof obj[f] === "string"
+                                                    && obj[f].startsWith("eyJ")
+                                                    && obj[f].split(".").length === 3) {
+                                                    return "Bearer " + obj[f];
+                                                }
+                                            }
+                                        } catch(e) {}
                                     }
                                 }
-                            }
+                            } catch(e) {}
                         }
                         return "";
-                    }""")
+                    }
+                    """)
                     if tok:
                         captured["auth"] = tok
                 except Exception:
                     pass
 
+            # ── Strategy 3: Trigger a live OWA API call to force Bearer emission ──
+            if not captured["auth"]:
+                try:
+                    # Build a lightweight FindItem request and fire it via fetch()
+                    # inside the page context — this forces OWA's JS to add the
+                    # Authorization header, which we intercept via on_request.
+                    service_url = mailbox_url.rstrip("/").split("/mail/")[0]
+                    email_part = mailbox_url.split("/mail/")[-1].rstrip("/")
+                    svc_endpoint = f"{service_url}/owa/{email_part}/service.svc?action=FindItem&app=Mail&n=0"
+
+                    page.evaluate(f"""
+                    async () => {{
+                        try {{
+                            await fetch({repr(svc_endpoint)}, {{
+                                method: "POST",
+                                credentials: "include",
+                                headers: {{ "Content-Type": "application/json" }},
+                                body: JSON.stringify({{ Header: {{ RequestServerVersion: "V2018_01_08" }}, Body: {{ __type: "FindItemRequest:#Exchange", Traversal: "Shallow", ItemShape: {{ BaseShape: "IdOnly" }}, ParentFolderIds: [{{ __type: "DistinguishedFolderId:#Exchange", Id: "inbox" }}] }} }})
+                            }});
+                        }} catch(e) {{}}
+                    }}
+                    """)
+                    # Give the interceptor a moment to fire
+                    time.sleep(2)
+                except Exception:
+                    pass
+
+            # Final settle
+            if not captured["auth"]:
+                time.sleep(2)
+
             cookies = {c["name"]: c["value"] for c in context.cookies()}
             if captured["auth"]:
                 cookies["_AUTH_HEADER"] = captured["auth"]
+                # Persist token to .env for resilience across restarts
+                _save_token_to_env(captured["auth"])
             return cookies
 
         except OutlookSessionExpiredError:
@@ -165,6 +233,19 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
             raise OutlookNetworkError(f"Playwright error during login: {exc}") from exc
         finally:
             context.close()
+
+
+def _save_token_to_env(token: str):
+    """Persist the captured Bearer token to .env so it survives restarts."""
+    try:
+        from pathlib import Path as _Path
+        from dotenv import set_key as _set_key
+        root = _Path(__file__).resolve().parent.parent.parent
+        env_path = root / ".env"
+        if env_path.exists():
+            _set_key(str(env_path), "OUTLOOK_AUTH_TOKEN", token)
+    except Exception:
+        pass  # Non-critical
 
 
 def initialize_session(mailbox_url: str, browser_profile_dir: str):

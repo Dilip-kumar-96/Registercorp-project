@@ -241,10 +241,12 @@ def _phase2_portal():
         session_logger.log("info", "PORTAL_SKIP", reason="no_pending_emails")
         return
 
+    pending_tracking_numbers = [email["tracking_number"] for email in pending]
+
     try:
         status_map = portal_module.fetch_statuses(
             token=config.get_portal_token(),
-            date_range_days=config.get_api_date_range_days(),
+            tracking_numbers=pending_tracking_numbers,
         )
     except portal_module.PortalTokenExpiredError as exc:
         session_logger.log("error", "PORTAL_TOKEN_EXPIRED", error=str(exc))

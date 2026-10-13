@@ -288,11 +288,103 @@ def _save_token_to_env(token: str):
         pass  # Non-critical
 
 
+def apply_manual_session(bearer_token: str, owa_canary: str = ""):
+    """
+    Apply manually-extracted tokens (from the user's regular browser) directly
+    to the live session. This bypasses Playwright entirely.
+
+    Args:
+        bearer_token: The 'Authorization: Bearer eyJ...' value from F12 Network tab
+        owa_canary:   The X-OWA-CANARY cookie value from F12 Application tab (optional)
+    """
+    cookies = {}
+    if owa_canary:
+        cookies["X-OWA-CANARY"] = owa_canary
+    cookies["_AUTH_HEADER"] = bearer_token
+    _set_cookies(cookies)
+    _save_token_to_env(bearer_token)
+
+    # Also persist canary to .env if provided
+    if owa_canary:
+        try:
+            from pathlib import Path as _Path
+            from dotenv import set_key as _set_key
+            root = _Path(__file__).resolve().parent.parent.parent
+            env_path = root / ".env"
+            if env_path.exists():
+                _set_key(str(env_path), "OUTLOOK_OWA_CANARY", owa_canary)
+        except Exception:
+            pass
+
+
+def test_manual_session(bearer_token: str, owa_canary: str = "") -> tuple[bool, str]:
+    """
+    Test a manually-provided Bearer token by making a live FindItem call.
+    Does NOT modify any stored state.
+
+    Returns:
+        (True, success_message) or (False, error_message)
+    """
+    import requests as _req
+
+    if not bearer_token.startswith("Bearer "):
+        bearer_token = f"Bearer {bearer_token}"
+
+    url = f"{OWA_BASE}?action=FindItem&app=Mail&n=1"
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
+        "action": "FindItem",
+        "x-anchormailbox": "pn@registrarcorp.com",
+        "Authorization": bearer_token,
+        "X-OWA-CANARY": owa_canary,
+    }
+    body = {
+        "Header": {
+            "RequestServerVersion": "V2018_01_08",
+            "TimeZoneContext": {"TimeZoneDefinition": {"Id": "UTC"}},
+        },
+        "Body": {
+            "__type": "FindItemRequest:#Exchange",
+            "ItemShape": {"BaseShape": "IdOnly"},
+            "Paging": {
+                "__type": "IndexedPageView:#Exchange",
+                "BasePoint": "Beginning",
+                "Offset": 0,
+                "MaxEntriesReturned": 5,
+            },
+            "ParentFolderIds": [
+                {"__type": "DistinguishedFolderId:#Exchange", "Id": "inbox"}
+            ],
+            "Traversal": "Shallow",
+        },
+    }
+    try:
+        resp = _req.post(url, json=body, headers=headers, timeout=15, allow_redirects=False)
+        if resp.status_code == 200:
+            try:
+                count = len(
+                    resp.json()["Body"]["ResponseMessages"]["Items"][0]
+                    ["RootFolder"]["Items"]
+                )
+                return True, f"✅ Token is valid — inbox readable ({count} items returned)."
+            except Exception:
+                return True, "✅ Token accepted by Outlook (HTTP 200)."
+        elif resp.status_code == 401:
+            return False, "❌ Token rejected (HTTP 401). The token may be expired or belong to a different account."
+        elif resp.status_code in (301, 302):
+            return False, f"❌ Redirected to login (HTTP {resp.status_code}). Session is not authenticated."
+        else:
+            return False, f"❌ Unexpected HTTP {resp.status_code}: {resp.text[:150]}"
+    except _req.RequestException as exc:
+        return False, f"❌ Network error: {exc}"
+
 
 def initialize_session(mailbox_url: str, browser_profile_dir: str):
     """Extract cookies via Playwright and store them. Call once at bot startup."""
     cookies = get_cookies_via_playwright(mailbox_url, browser_profile_dir)
     _set_cookies(cookies)
+
 
 
 # ── OWA API request helper ────────────────────────────────────────────────────
@@ -309,13 +401,15 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
     if auth_header and not auth_header.startswith("Bearer "):
         auth_header = f"Bearer {auth_header}"
 
+    canary = cookies.get("X-OWA-CANARY", "") or os.getenv("OUTLOOK_OWA_CANARY", "")
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "Accept": "application/json",
-        "X-OWA-CANARY": cookies.get("X-OWA-CANARY", ""),
+        "X-OWA-CANARY": canary,
         "action": action,
         "x-anchormailbox": "pn@registrarcorp.com",
     }
+
     if auth_header:
         headers["Authorization"] = auth_header
 

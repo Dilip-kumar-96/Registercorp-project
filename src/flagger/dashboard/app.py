@@ -195,6 +195,56 @@ def api_alerts_dismiss():
     return jsonify({"success": True})
 
 
+# ── Manual Outlook session (paste from browser) ───────────────────────────────
+
+@app.route("/api/outlook/session/test", methods=["POST"])
+def api_outlook_session_test():
+    """
+    Test a manually-entered Bearer token + OWA Canary by making a live
+    FindItem call against the OWA API. Does NOT save anything.
+    """
+    data = request.json or {}
+    bearer = data.get("bearer_token", "").strip()
+    canary = data.get("owa_canary", "").strip()
+
+    if not bearer:
+        return jsonify({"valid": False, "message": "Bearer token cannot be empty."})
+
+    if not bearer.startswith("Bearer "):
+        bearer = f"Bearer {bearer}"
+
+    valid, message = outlook_module.test_manual_session(bearer, canary)
+    return jsonify({"valid": valid, "message": message})
+
+
+@app.route("/api/outlook/session/save", methods=["POST"])
+def api_outlook_session_save():
+    """
+    Save manually-entered Bearer token + OWA Canary.
+    Applies immediately to the running bot without restart.
+    """
+    data = request.json or {}
+    bearer = data.get("bearer_token", "").strip()
+    canary = data.get("owa_canary", "").strip()
+
+    if not bearer:
+        return jsonify({"success": False, "message": "Bearer token cannot be empty."})
+
+    if not bearer.startswith("Bearer "):
+        bearer = f"Bearer {bearer}"
+
+    try:
+        outlook_module.apply_manual_session(bearer, canary)
+        session_logger.log("info", "OUTLOOK_MANUAL_SESSION_APPLIED")
+        database.log_activity("info", "OUTLOOK_MANUAL_SESSION", detail="Tokens applied manually via Settings")
+        # Resume bot if it was paused due to session error
+        if bot_engine.get_status()["paused"]:
+            bot_engine.resume()
+        return jsonify({"success": True, "message": "Session tokens saved and applied. Bot will use these on next cycle."})
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
 # ── Server runner ─────────────────────────────────────────────────────────────
 
 def run_in_thread(port: int = 5000):

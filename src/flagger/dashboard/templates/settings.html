@@ -7,6 +7,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .howto-steps { background: var(--bg-card-alt, #1a1f2e); border: 1px solid var(--border, #2a3047); border-radius: 10px; padding: 0.6rem 1rem; margin-bottom: 1rem; }
+    .howto-steps summary { cursor: pointer; font-weight: 600; color: var(--accent, #4f8ef7); padding: 0.4rem 0; user-select: none; }
+    .howto-steps ol { margin: 0.8rem 0 0.4rem 1.4rem; line-height: 2.1; color: var(--text-muted, #8899aa); font-size: 0.9rem; }
+    .howto-steps code { background: rgba(79,142,247,0.12); color: var(--accent, #4f8ef7); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.82rem; }
+    .manual-field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.9rem; }
+    .manual-field label { font-size: 0.85rem; font-weight: 600; color: var(--text, #e2e8f0); }
+    .manual-field .field-hint { font-size: 0.78rem; font-weight: 400; color: var(--text-muted, #8899aa); margin-left: 0.3rem; }
+    .manual-field .input { font-family: monospace; font-size: 0.82rem; }
+    .required-star { color: #ef4444; }
+  </style>
 </head>
 <body>
 
@@ -20,6 +31,7 @@
 
 <main class="main">
 
+  <!-- ── Bot Behaviour ──────────────────────────────────────────────────── -->
   <div class="card">
     <h2 class="section-title">Bot Behaviour</h2>
 
@@ -93,15 +105,73 @@
     </div>
   </div>
 
+  <!-- ── Portal API Token ───────────────────────────────────────────────── -->
   <div class="card">
     <h2 class="section-title">Portal API Token</h2>
     <p class="setup-desc">Update if the portal token has expired.</p>
     <div class="token-input-row">
       <input id="token-input" class="input" type="text" placeholder="Paste new portal token here…" />
       <button class="btn btn-ghost" onclick="testToken()">Test</button>
-      <button class="btn btn-green" onclick="saveToken()">Save & Apply</button>
+      <button class="btn btn-green" onclick="saveToken()">Save &amp; Apply</button>
     </div>
     <p id="token-result" class="token-result"></p>
+  </div>
+
+  <!-- ── Outlook Manual Session ─────────────────────────────────────────── -->
+  <div class="card">
+    <h2 class="section-title">🔑 Outlook Manual Session</h2>
+    <p class="setup-desc">
+      No Chromium login needed — paste tokens directly from your <strong>already logged-in Chrome browser</strong>.
+      This is the easiest way to set up Outlook on a new machine or fix a broken session.
+    </p>
+
+    <details class="howto-steps">
+      <summary>📖 How to get these values from Chrome (click to expand)</summary>
+      <ol>
+        <li>Open <strong>Chrome</strong> and go to the shared Outlook inbox:<br>
+          <code>https://outlook.cloud.microsoft/mail/pn@registrarcorp.com/</code>
+        </li>
+        <li>Press <strong>F12</strong> to open DevTools → click the <strong>Network</strong> tab</li>
+        <li>In the filter box, type <code>service.svc</code> to filter requests</li>
+        <li>Click any <code>service.svc</code> request that appears</li>
+        <li>In the right panel → <strong>Headers</strong> → scroll to <em>Request Headers</em></li>
+        <li>Find <code>Authorization</code> → copy the full value: <code>Bearer eyJ...</code></li>
+        <li>Paste it in the <strong>Bearer Token</strong> field below and click <strong>Test Token</strong></li>
+        <li><em>Optional but recommended:</em> Go to <strong>Application</strong> tab → Cookies → <code>outlook.cloud.microsoft</code> → copy <code>X-OWA-CANARY</code> value</li>
+      </ol>
+    </details>
+
+    <div class="manual-field">
+      <label for="outlook-bearer">
+        Bearer Token <span class="required-star">*</span>
+        <span class="field-hint">— F12 → Network → service.svc → Request Headers → Authorization</span>
+      </label>
+      <input
+        id="outlook-bearer"
+        class="input"
+        type="text"
+        placeholder="Bearer eyJhbGciOiJSUzI1NiIs…"
+      />
+    </div>
+
+    <div class="manual-field">
+      <label for="outlook-canary">
+        X-OWA-CANARY
+        <span class="field-hint">— optional (F12 → Application → Cookies → X-OWA-CANARY)</span>
+      </label>
+      <input
+        id="outlook-canary"
+        class="input"
+        type="text"
+        placeholder="Optional — helps with write operations like flagging"
+      />
+    </div>
+
+    <div class="token-input-row">
+      <button class="btn btn-ghost" id="btn-test-outlook" onclick="testOutlookSession()">🧪 Test Token</button>
+      <button class="btn btn-green" id="btn-save-outlook" onclick="saveOutlookSession()">💾 Save &amp; Apply</button>
+    </div>
+    <p id="outlook-session-result" class="token-result" style="margin-top:0.6rem;"></p>
   </div>
 
 </main>
@@ -145,6 +215,66 @@ async function saveToken() {
   const data = await res.json();
   result.textContent = (data.success ? '✅ ' : '❌ ') + data.message;
   result.className = 'token-result ' + (data.success ? 'success' : 'error');
+}
+
+async function testOutlookSession() {
+  const bearer = document.getElementById('outlook-bearer').value.trim();
+  const canary = document.getElementById('outlook-canary').value.trim();
+  const result = document.getElementById('outlook-session-result');
+  const btn = document.getElementById('btn-test-outlook');
+  if (!bearer) {
+    result.textContent = '⚠ Please paste the Bearer token first.';
+    result.className = 'token-result error';
+    return;
+  }
+  btn.disabled = true;
+  result.textContent = '⏳ Making a live call to Outlook API…';
+  result.className = 'token-result';
+  try {
+    const res = await fetch('/api/outlook/session/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bearer_token: bearer, owa_canary: canary })
+    });
+    const data = await res.json();
+    result.textContent = data.message;
+    result.className = 'token-result ' + (data.valid ? 'success' : 'error');
+  } catch(e) {
+    result.textContent = '❌ Request failed: ' + e.message;
+    result.className = 'token-result error';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveOutlookSession() {
+  const bearer = document.getElementById('outlook-bearer').value.trim();
+  const canary = document.getElementById('outlook-canary').value.trim();
+  const result = document.getElementById('outlook-session-result');
+  const btn = document.getElementById('btn-save-outlook');
+  if (!bearer) {
+    result.textContent = '⚠ Please paste the Bearer token first.';
+    result.className = 'token-result error';
+    return;
+  }
+  btn.disabled = true;
+  result.textContent = '⏳ Saving…';
+  result.className = 'token-result';
+  try {
+    const res = await fetch('/api/outlook/session/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bearer_token: bearer, owa_canary: canary })
+    });
+    const data = await res.json();
+    result.textContent = data.success ? '✅ ' + data.message : '❌ ' + data.message;
+    result.className = 'token-result ' + (data.success ? 'success' : 'error');
+  } catch(e) {
+    result.textContent = '❌ Request failed: ' + e.message;
+    result.className = 'token-result error';
+  } finally {
+    btn.disabled = false;
+  }
 }
 </script>
 </body>

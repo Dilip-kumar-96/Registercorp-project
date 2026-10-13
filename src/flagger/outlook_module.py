@@ -64,12 +64,13 @@ def _mark_expired():
 
 def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> dict:
     """
-    Open Outlook Web using Playwright and extract session cookies.
+    Open Outlook Web using Playwright and extract session cookies and auth tokens.
     The browser profile preserves the "Keep me signed in" session.
 
-    Returns dict of cookies ready for use in requests.
+    Returns dict of cookies (including optional _AUTH_HEADER) ready for use in requests.
     Raises OutlookSessionExpiredError if the session has expired (login page shown).
     """
+    import os
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
     profile_path = str(Path(browser_profile_dir).resolve())
@@ -82,6 +83,14 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
         )
         try:
             page = context.new_page()
+            captured = {"auth": os.getenv("OUTLOOK_AUTH_TOKEN", "")}
+
+            def on_request(req):
+                auth = req.headers.get("authorization")
+                if auth and auth.startswith("Bearer "):
+                    captured["auth"] = auth
+
+            page.on("request", on_request)
             page.goto(mailbox_url, wait_until="domcontentloaded", timeout=30_000)
 
             # Give the page time to settle / redirect
@@ -100,8 +109,30 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
                     "Please re-login via the dashboard Re-login button."
                 )
 
-            cookies = context.cookies()
-            return {c["name"]: c["value"] for c in cookies}
+            # Check sessionStorage if token was not captured from request headers
+            if not captured["auth"]:
+                try:
+                    tok = page.evaluate("""() => {
+                        for (let i = 0; i < sessionStorage.length; i++) {
+                            const k = sessionStorage.key(i);
+                            if (k && k.toLowerCase().includes("accesstoken")) {
+                                try {
+                                    const val = JSON.parse(sessionStorage.getItem(k));
+                                    if (val && val.secret) return "Bearer " + val.secret;
+                                } catch(e) {}
+                            }
+                        }
+                        return "";
+                    }""")
+                    if tok:
+                        captured["auth"] = tok
+                except Exception:
+                    pass
+
+            cookies = {c["name"]: c["value"] for c in context.cookies()}
+            if captured["auth"]:
+                cookies["_AUTH_HEADER"] = captured["auth"]
+            return cookies
 
         except OutlookSessionExpiredError:
             raise
@@ -121,9 +152,13 @@ def initialize_session(mailbox_url: str, browser_profile_dir: str):
 
 def _post(action: str, body: dict, attempt: int = 1) -> dict:
     """POST to the OWA service.svc endpoint with the given action and body."""
+    import os
     url = f"{OWA_BASE}?action={action}&app=Mail&n=1"
     with _cookies_lock:
         cookies = dict(_cookies)
+
+    auth_header = cookies.pop("_AUTH_HEADER", None) or os.getenv("OUTLOOK_AUTH_TOKEN", "")
+
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "Accept": "application/json",
@@ -131,6 +166,8 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
         "action": action,
         "x-anchormailbox": "pn@registrarcorp.com",
     }
+    if auth_header:
+        headers["Authorization"] = auth_header
 
     try:
         resp = requests.post(
@@ -139,11 +176,16 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
             allow_redirects=False,
         )
 
-        # Redirect to login = session expired
-        if resp.status_code in (301, 302, 303):
+        # Redirect to login or 401/403/440 = session expired
+        if resp.status_code in (301, 302, 303, 401, 403, 440):
             _mark_expired()
             raise OutlookSessionExpiredError(
-                f"Outlook session expired: HTTP {resp.status_code} redirect to login."
+                f"Outlook session expired or unauthorized (HTTP {resp.status_code}). Please re-login via the dashboard."
+            )
+
+        if resp.status_code != 200:
+            raise OutlookAPIError(
+                f"Outlook API error HTTP {resp.status_code}: {resp.text[:200]}"
             )
 
         # Try JSON parse — failure usually means we got a login page HTML

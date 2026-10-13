@@ -153,7 +153,7 @@ def fetch_statuses(token: str, date_range_days: int = 2) -> dict[str, str]:
     }
 
 
-def test_token(token: str) -> tuple[bool, str]:
+def validate_token(token: str) -> tuple[bool, str]:
     """
     Validate a portal API token by making a minimal test request.
 
@@ -170,3 +170,8 @@ def test_token(token: str) -> tuple[bool, str]:
         return False, f"Network error — cannot verify token: {exc}"
     except PortalParseError as exc:
         return False, f"Unexpected response from portal: {exc}"
+
+
+# Alias for backward compatibility
+test_token = validate_token
+

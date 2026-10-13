@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from flagger.portal_module import (
     fetch_statuses,
-    test_token,
+    validate_token,
     PortalTokenExpiredError,
     PortalNetworkError,
     PortalParseError,
@@ -142,13 +142,13 @@ class TestTestToken:
     def test_valid_token_returns_true(self, portal_empty_response):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(portal_empty_response)
-            valid, msg = test_token("good-token")
+            valid, msg = validate_token("good-token")
         assert valid is True
 
     def test_expired_token_returns_false(self):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(status_code=401)
-            valid, msg = test_token("bad-token")
+            valid, msg = validate_token("bad-token")
         assert valid is False
         assert "expired" in msg.lower() or "invalid" in msg.lower()
 
@@ -157,6 +157,6 @@ class TestTestToken:
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.side_effect = req.ConnectionError("no network")
             with patch("flagger.portal_module.time.sleep"):
-                valid, msg = test_token("token")
+                valid, msg = validate_token("token")
         assert valid is False
         assert "network" in msg.lower()

@@ -129,6 +129,7 @@ def _post(action: str, body: dict, attempt: int = 1) -> dict:
         "Accept": "application/json",
         "X-OWA-CANARY": cookies.get("X-OWA-CANARY", ""),
         "action": action,
+        "x-anchormailbox": "pn@registrarcorp.com",
     }
 
     try:

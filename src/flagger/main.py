@@ -104,17 +104,20 @@ def main():
         session_logger.log("error", "OUTLOOK_NETWORK_ON_STARTUP", error=str(exc))
         alerts.network_error("Outlook")
 
-    # ── 8. Start bot engine ───────────────────────────────────
+    # ── 8. Start bot engine (only if configured to auto-start) ─
     if config.get_portal_token():
-        bot_engine.start()
-        print(f"  Bot engine → started (dry_run={config.is_dry_run()}) ✓")
+        if config.is_auto_start_bot():
+            bot_engine.start()
+            print(f"  Bot engine → started automatically (dry_run={config.is_dry_run()}) ✓")
+        else:
+            print(f"  Bot engine → ready in STOPPED mode (dry_run={config.is_dry_run()}). Start via dashboard.")
     else:
         print("  Bot engine → waiting (no portal token — complete Setup Wizard)")
 
     print("=" * 56)
     print("  FedEx Flagger is running. Minimize this window.")
     print(f"  Open the dashboard: {dashboard_url}")
-    print("  Right-click the 🚩 tray icon to Stop or Exit.")
+    print("  Right-click the 🚩 tray icon to Start/Stop or Exit.")
     print("=" * 56)
 
     # ── 9. System tray (main thread — blocks until Exit) ──────

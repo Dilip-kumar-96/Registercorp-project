@@ -14,8 +14,9 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from . import config
 
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "session.db"
+_DB_PATH = config.get_app_dir() / "session.db"
 _lock = threading.Lock()
 
 
@@ -180,14 +181,17 @@ def get_counts() -> dict:
 
 def log_activity(level: str, event: str, tracking: str = None, detail: str = None):
     """Append a row to the activity log (shown on dashboard)."""
-    with _lock:
-        db = _conn()
-        db.execute(
-            "INSERT INTO activity_log (ts, level, event, tracking, detail) VALUES (?,?,?,?,?)",
-            (datetime.now().strftime("%H:%M:%S"), level, event, tracking, detail)
-        )
-        db.commit()
-        db.close()
+    try:
+        with _lock:
+            db = _conn()
+            db.execute(
+                "INSERT INTO activity_log (ts, level, event, tracking, detail) VALUES (?,?,?,?,?)",
+                (datetime.now().strftime("%H:%M:%S"), level, event, tracking, detail)
+            )
+            db.commit()
+            db.close()
+    except Exception:
+        pass
 
 
 def get_activity(limit: int = 50) -> list[dict]:

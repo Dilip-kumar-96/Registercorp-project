@@ -134,17 +134,33 @@
       <div class="ready-checklist">
         <div class="check-item check-ok">✅ Portal token saved and verified</div>
         <div id="outlook-check-item" class="check-item check-ok">✅ Outlook session connected</div>
-        <div class="check-item check-info">
-          🟡 Dry run mode is <strong>ON</strong> — the bot will log decisions but not actually flag emails.
-          <br/>Run for one full shift to verify, then disable via Settings.
+      </div>
+
+      <!-- Mode selection toggle -->
+      <div style="background:var(--bg-card-2, #1e2438); border:1px solid var(--border, #2a3047); border-radius:var(--radius-sm, 8px); padding:16px; margin:16px 0 20px 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div>
+            <div style="font-weight:600; font-size:0.95rem; margin-bottom:4px; color:var(--text, #e2e8f0);">Mode on Start</div>
+            <div id="setup-dry-run-desc" style="font-size:0.82rem; color:var(--text-2, #8899aa); line-height:1.4;">
+              🟡 Dry Run ON: The bot logs decisions but will NOT actually flag emails in Outlook.
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+            <label class="toggle" title="Toggle between Dry Run and Live Mode">
+              <input type="checkbox" id="setup-dry-run" onchange="onSetupDryRunChange(this.checked)" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="setup-dry-run-label" class="toggle-label" style="font-weight:600; font-size:0.85rem; min-width:90px;">Dry Run</span>
+          </div>
         </div>
       </div>
+
       <p id="step3-skip-note" style="display:none; color:var(--text-muted,#8899aa); font-size:0.85rem; margin-top:0.8rem;">
         ⚠ Outlook session was skipped. Go to <a href="/settings" class="link">Settings → Outlook Manual Session</a> to add the Bearer token before starting the bot.
       </p>
       <div class="step-actions">
         <button class="btn btn-ghost" onclick="goToStep(2)">← Back</button>
-        <button class="btn btn-green btn-lg" onclick="startBotAndGo()">▶ Start Bot</button>
+        <button id="btn-start-wizard" class="btn btn-green btn-lg" onclick="startBotAndGo()">▶ Start Bot</button>
       </div>
     </div>
   </div>
@@ -163,6 +179,9 @@ function goToStep(n) {
     el.classList.toggle('active', i + 1 === n);
     el.classList.toggle('done', i + 1 < n);
   });
+  if (n === 3) {
+    initStep3Mode();
+  }
 }
 
 async function setupTestToken() {
@@ -270,7 +289,58 @@ function skipOutlookStep() {
   goToStep(3);
 }
 
+async function initStep3Mode() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const isDry = data.dry_run ?? true;
+    const el = document.getElementById('setup-dry-run');
+    if (el) {
+      el.checked = isDry;
+      onSetupDryRunChange(isDry);
+    }
+  } catch (e) {
+    onSetupDryRunChange(true);
+  }
+}
+
+function onSetupDryRunChange(isDry) {
+  const label = document.getElementById('setup-dry-run-label');
+  const desc = document.getElementById('setup-dry-run-desc');
+  const btn = document.getElementById('btn-start-wizard');
+  if (isDry) {
+    if (label) {
+      label.textContent = 'ON (Safe)';
+      label.style.color = 'var(--yellow, #f59e0b)';
+    }
+    if (desc) {
+      desc.innerHTML = '🟡 <strong>Dry Run ON</strong> — The bot logs decisions but will <em>NOT</em> flag emails in Outlook. Safe for testing.';
+    }
+    if (btn) btn.textContent = '▶ Start Bot (Dry Run)';
+  } else {
+    if (label) {
+      label.textContent = 'OFF (Live)';
+      label.style.color = 'var(--green, #10b981)';
+    }
+    if (desc) {
+      desc.innerHTML = '🟢 <strong>Live Mode</strong> — The bot <em>WILL flag</em> confirmed emails in Outlook.';
+    }
+    if (btn) btn.textContent = '▶ Start Bot (Live)';
+  }
+}
+
 async function startBotAndGo() {
+  const dryRunEl = document.getElementById('setup-dry-run');
+  const isDry = dryRunEl ? dryRunEl.checked : true;
+  try {
+    await fetch('/api/bot/dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: isDry })
+    });
+  } catch (e) {
+    // continue
+  }
   await fetch('/api/bot/start', { method: 'POST' });
   window.location.href = '/';
 }

@@ -69,10 +69,25 @@ function updateBotStatus(engine) {
   btnStart.style.display  = (s === 'STOPPED') ? 'inline-flex' : 'none';
   btnStop.style.display   = (s === 'RUNNING') ? 'inline-flex' : 'none';
   btnResume.style.display = (s === 'PAUSED')  ? 'inline-flex' : 'none';
+  btnStart.textContent   = engine.dry_run ? '▶ Start Bot (Dry Run)' : '▶ Start Bot (Live)';
 
-  // Dry run badge
+  // Dry run toggle and badge
+  const drToggle = document.getElementById('dash-dry-run');
+  const drLabel  = document.getElementById('dash-dry-run-label');
+  if (drToggle && document.activeElement !== drToggle) {
+    drToggle.checked = Boolean(engine.dry_run);
+  }
+  if (drLabel) {
+    drLabel.textContent = engine.dry_run ? 'Dry Run (Safe)' : 'Live Mode';
+    drLabel.style.color = engine.dry_run ? 'var(--yellow)' : 'var(--green)';
+  }
+
   const drBadge = document.getElementById('dry-run-badge');
-  if (drBadge) drBadge.style.display = engine.dry_run ? 'inline-block' : 'none';
+  if (drBadge) {
+    drBadge.style.display = 'inline-block';
+    drBadge.className = 'badge ' + (engine.dry_run ? 'badge-yellow' : 'badge-green');
+    drBadge.textContent = engine.dry_run ? 'DRY RUN' : 'LIVE';
+  }
 }
 
 function updateCounts(counts) {
@@ -188,7 +203,48 @@ function updateSessionInfo(engine) {
 
 // ── Bot control ───────────────────────────────────────────────────────────────
 
+async function toggleDashDryRun(checked) {
+  const drLabel = document.getElementById('dash-dry-run-label');
+  const btnStart = document.getElementById('btn-start');
+  const drBadge = document.getElementById('dry-run-badge');
+
+  if (drLabel) {
+    drLabel.textContent = checked ? 'Dry Run (Safe)' : 'Live Mode';
+    drLabel.style.color = checked ? 'var(--yellow)' : 'var(--green)';
+  }
+  if (btnStart) {
+    btnStart.textContent = checked ? '▶ Start Bot (Dry Run)' : '▶ Start Bot (Live)';
+  }
+  if (drBadge) {
+    drBadge.className = 'badge ' + (checked ? 'badge-yellow' : 'badge-green');
+    drBadge.textContent = checked ? 'DRY RUN' : 'LIVE';
+  }
+
+  try {
+    await fetch('/api/bot/dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: checked })
+    });
+  } catch (e) {
+    console.error('Failed to update dry run mode:', e);
+  }
+  setTimeout(fetchStatus, 300);
+}
+
 async function startBot() {
+  const drToggle = document.getElementById('dash-dry-run');
+  if (drToggle) {
+    try {
+      await fetch('/api/bot/dry-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: drToggle.checked })
+      });
+    } catch (e) {
+      // non-fatal
+    }
+  }
   await fetch('/api/bot/start', { method: 'POST' });
   setTimeout(fetchStatus, 500);
 }

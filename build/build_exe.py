@@ -44,9 +44,10 @@ def build():
         "--specpath", str(ROOT / "build"),
         # Add Python source path
         "--paths", str(SRC),
-        # Include Flask templates and static files
+        # Include Flask templates, static files, and default env
         "--add-data", f"{SRC / 'flagger' / 'dashboard' / 'templates'}{os.pathsep}flagger/dashboard/templates",
         "--add-data", f"{SRC / 'flagger' / 'dashboard' / 'static'}{os.pathsep}flagger/dashboard/static",
+        "--add-data", f"{ROOT / '.env.example'}{os.pathsep}.",
         # Hidden imports Flask/Jinja2 don't always auto-detect
         "--hidden-import", "flask",
         "--hidden-import", "jinja2",

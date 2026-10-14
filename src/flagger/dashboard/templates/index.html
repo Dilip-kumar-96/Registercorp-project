@@ -41,7 +41,15 @@
         <div id="status-detail" class="status-detail">—</div>
       </div>
     </div>
-    <div class="status-right">
+    <div class="status-right" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <div id="dash-dry-run-wrapper" class="dash-mode-wrapper" style="display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--bg-card-2); border-radius:var(--radius-sm); border:1px solid var(--border);">
+        <span style="font-size:0.8rem; font-weight:600; color:var(--text-2);">Mode:</span>
+        <label class="toggle" title="Toggle between Safe Dry Run and Live Flagging">
+          <input type="checkbox" id="dash-dry-run" onchange="toggleDashDryRun(this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="dash-dry-run-label" class="toggle-label" style="font-weight:600; font-size:0.82rem; min-width:85px;">Dry Run</span>
+      </div>
       <button id="btn-start" class="btn btn-green" onclick="startBot()" style="display:none">▶ Start Bot</button>
       <button id="btn-stop"  class="btn btn-red"   onclick="stopBot()"  style="display:none">⏹ Stop Bot</button>
       <button id="btn-resume" class="btn btn-yellow" onclick="resumeBot()" style="display:none">↺ Resume</button>

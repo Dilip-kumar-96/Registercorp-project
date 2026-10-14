@@ -10,12 +10,13 @@ Log file format: logs/session_YYYY-MM-DD_HH-MM-SS.log
 import logging
 from datetime import datetime
 from pathlib import Path
+from . import config
 
 _logger: logging.Logger | None = None
 _log_file_path: Path | None = None
 _session_start: datetime | None = None
 
-_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+_LOG_DIR = config.get_app_dir() / "logs"
 
 
 def create():

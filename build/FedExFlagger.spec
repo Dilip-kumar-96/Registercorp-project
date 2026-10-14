@@ -5,7 +5,7 @@ a = Analysis(
     ['D:\\Projects\\Registercorp-project\\src\\flagger\\main.py'],
     pathex=['D:\\Projects\\Registercorp-project\\src'],
     binaries=[],
-    datas=[('D:\\Projects\\Registercorp-project\\src\\flagger\\dashboard\\templates', 'flagger/dashboard/templates'), ('D:\\Projects\\Registercorp-project\\src\\flagger\\dashboard\\static', 'flagger/dashboard/static')],
+    datas=[('D:\\Projects\\Registercorp-project\\src\\flagger\\dashboard\\templates', 'flagger/dashboard/templates'), ('D:\\Projects\\Registercorp-project\\src\\flagger\\dashboard\\static', 'flagger/dashboard/static'), ('D:\\Projects\\Registercorp-project\\.env.example', '.')],
     hiddenimports=['flask', 'jinja2', 'werkzeug', 'pystray', 'PIL', 'plyer', 'plyer.platforms.win.notification'],
     hookspath=[],
     hooksconfig={},

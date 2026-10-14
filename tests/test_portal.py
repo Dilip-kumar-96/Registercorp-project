@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from flagger.portal_module import (
     fetch_statuses,
+    lookup_tracking_number,
     validate_token,
     PortalTokenExpiredError,
     PortalNetworkError,
@@ -28,26 +29,31 @@ def _mock_response(json_data=None, status_code=200, raises=None):
 
 
 class TestFetchStatuses:
-    def test_single_page_confirmed(self, portal_confirmed_response):
+    def test_single_confirmed(self, portal_confirmed_response):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(portal_confirmed_response)
-            result = fetch_statuses("valid-token", date_range_days=2)
+            result = fetch_statuses("valid-token", ["384007184685"])
         assert result["384007184685"] == "CONFIRMED"
 
     def test_multiple_statuses(self):
-        data = {
-            "success": True,
-            "data": [
-                {"TRACKING_NUMBER": "111", "STATUS": "CONFIRMED"},
-                {"TRACKING_NUMBER": "222", "STATUS": "FAILED"},
-                {"TRACKING_NUMBER": "333", "STATUS": "SUBMITTED"},
-                {"TRACKING_NUMBER": "444", "STATUS": "PROCESSING"},
-            ],
-            "meta": {"count": 4},
-        }
-        with patch("flagger.portal_module.requests.get") as mock_get:
-            mock_get.return_value = _mock_response(data)
-            result = fetch_statuses("token", 2)
+        def _get_side_effect(url, headers=None, params=None, timeout=None):
+            q = (params or {}).get("q", "")
+            mapping = {
+                "111": "CONFIRMED",
+                "222": "FAILED",
+                "333": "SUBMITTED",
+                "444": "PROCESSING",
+            }
+            status = mapping.get(q, "CONFIRMED")
+            data = {
+                "success": True,
+                "data": [{"TRACKING_NUMBER": q, "STATUS": status}],
+                "meta": {"count": 1},
+            }
+            return _mock_response(data)
+
+        with patch("flagger.portal_module.requests.get", side_effect=_get_side_effect):
+            result = fetch_statuses("token", ["111", "222", "333", "444"])
         assert result["111"] == "CONFIRMED"
         assert result["222"] == "FAILED"
         assert result["333"] == "SUBMITTED"
@@ -56,7 +62,7 @@ class TestFetchStatuses:
     def test_empty_response(self, portal_empty_response):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(portal_empty_response)
-            result = fetch_statuses("token", 2)
+            result = fetch_statuses("token", ["111"])
         assert result == {}
 
     def test_token_expired_401(self):
@@ -64,27 +70,27 @@ class TestFetchStatuses:
             mock_get.return_value = _mock_response(status_code=401)
             mock_get.return_value.raise_for_status = MagicMock()
             with pytest.raises(PortalTokenExpiredError):
-                fetch_statuses("bad-token", 2)
+                fetch_statuses("bad-token", ["111"])
 
     def test_token_expired_403(self):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(status_code=403)
             with pytest.raises(PortalTokenExpiredError):
-                fetch_statuses("bad-token", 2)
+                fetch_statuses("bad-token", ["111"])
 
     def test_api_success_false_with_token_message(self):
         data = {"success": False, "message": "Token is invalid or expired"}
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(data)
             with pytest.raises(PortalTokenExpiredError):
-                fetch_statuses("bad-token", 2)
+                fetch_statuses("bad-token", ["111"])
 
     def test_api_success_false_generic(self):
         data = {"success": False, "message": "Internal server error"}
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(data)
             with pytest.raises(PortalParseError):
-                fetch_statuses("token", 2)
+                fetch_statuses("token", ["111"])
 
     def test_network_error_retries_then_raises(self):
         import requests as req
@@ -92,7 +98,7 @@ class TestFetchStatuses:
             mock_get.side_effect = req.ConnectionError("connection refused")
             with patch("flagger.portal_module.time.sleep"):  # Don't actually sleep
                 with pytest.raises(PortalNetworkError):
-                    fetch_statuses("token", 2)
+                    fetch_statuses("token", ["111"])
             assert mock_get.call_count == 3  # MAX_RETRIES
 
     def test_timeout_retries_then_raises(self):
@@ -101,41 +107,19 @@ class TestFetchStatuses:
             mock_get.side_effect = req.Timeout("timed out")
             with patch("flagger.portal_module.time.sleep"):
                 with pytest.raises(PortalNetworkError):
-                    fetch_statuses("token", 2)
+                    fetch_statuses("token", ["111"])
 
     def test_invalid_json_response(self):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response(raises=ValueError("bad json"))
             with pytest.raises(PortalParseError):
-                fetch_statuses("token", 2)
+                fetch_statuses("token", ["111"])
 
     def test_missing_data_field(self):
         with patch("flagger.portal_module.requests.get") as mock_get:
             mock_get.return_value = _mock_response({"success": True, "records": []})
             with pytest.raises(PortalParseError):
-                fetch_statuses("token", 2)
-
-    def test_pagination_fetches_all_pages(self):
-        """When first page returns 25 records, should fetch the next page."""
-        page1 = {
-            "success": True,
-            "data": [{"TRACKING_NUMBER": str(i), "STATUS": "CONFIRMED"} for i in range(25)],
-            "meta": {"count": 25, "searchAfter": [123456, "cursor1"]},
-        }
-        page2 = {
-            "success": True,
-            "data": [{"TRACKING_NUMBER": "999", "STATUS": "FAILED"}],
-            "meta": {"count": 1},
-        }
-        with patch("flagger.portal_module.requests.get") as mock_get:
-            mock_get.side_effect = [
-                _mock_response(page1),
-                _mock_response(page2),
-            ]
-            result = fetch_statuses("token", 2)
-        assert len(result) == 26
-        assert result["999"] == "FAILED"
-        assert mock_get.call_count == 2
+                fetch_statuses("token", ["111"])
 
 
 class TestTestToken:

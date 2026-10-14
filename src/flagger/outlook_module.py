@@ -283,12 +283,10 @@ def get_cookies_via_playwright(mailbox_url: str, browser_profile_dir: str) -> di
 def _save_token_to_env(token: str):
     """Persist the captured Bearer token to .env so it survives restarts."""
     try:
-        from pathlib import Path as _Path
         from dotenv import set_key as _set_key
-        root = _Path(__file__).resolve().parent.parent.parent
-        env_path = root / ".env"
-        if env_path.exists():
-            _set_key(str(env_path), "OUTLOOK_AUTH_TOKEN", token)
+        from . import config
+        if config.ENV_PATH.exists():
+            _set_key(str(config.ENV_PATH), "OUTLOOK_AUTH_TOKEN", token)
     except Exception:
         pass  # Non-critical
 
@@ -312,12 +310,10 @@ def apply_manual_session(bearer_token: str, owa_canary: str = ""):
     # Also persist canary to .env if provided
     if owa_canary:
         try:
-            from pathlib import Path as _Path
             from dotenv import set_key as _set_key
-            root = _Path(__file__).resolve().parent.parent.parent
-            env_path = root / ".env"
-            if env_path.exists():
-                _set_key(str(env_path), "OUTLOOK_OWA_CANARY", owa_canary)
+            from . import config
+            if config.ENV_PATH.exists():
+                _set_key(str(config.ENV_PATH), "OUTLOOK_OWA_CANARY", owa_canary)
         except Exception:
             pass
 

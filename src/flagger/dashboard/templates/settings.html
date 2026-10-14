@@ -97,6 +97,23 @@
         </div>
       </div>
 
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="setting-label">Auto-start Bot on Launch</label>
+          <p class="setting-desc">
+            Automatically start scanning immediately when the application opens.
+            When OFF, the bot opens in Stopped mode so you can verify mode before starting.
+          </p>
+        </div>
+        <div class="setting-control">
+          <label class="toggle">
+            <input type="checkbox" id="auto-start-bot" {% if auto_start_bot %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="auto-start-bot-label" class="toggle-label">{{ 'ON (auto)' if auto_start_bot else 'OFF (manual start)' }}</span>
+        </div>
+      </div>
+
     </div>
 
     <div class="settings-actions">
@@ -181,6 +198,10 @@ document.getElementById('dry-run').addEventListener('change', function() {
   document.getElementById('dry-run-label').textContent = this.checked ? 'ON (safe mode)' : 'OFF (live mode)';
 });
 
+document.getElementById('auto-start-bot').addEventListener('change', function() {
+  document.getElementById('auto-start-bot-label').textContent = this.checked ? 'ON (auto)' : 'OFF (manual start)';
+});
+
 async function saveSettings() {
   const result = document.getElementById('settings-result');
   result.textContent = '⏳ Saving…'; result.className = 'token-result';
@@ -189,6 +210,7 @@ async function saveSettings() {
     date_range: parseInt(document.getElementById('date-range').value),
     dry_run: document.getElementById('dry-run').checked,
     auto_start: document.getElementById('auto-start').checked,
+    auto_start_bot: document.getElementById('auto-start-bot').checked,
   };
   const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   const data = await res.json();

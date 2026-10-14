@@ -53,6 +53,7 @@ def settings():
         date_range=config.get_api_date_range_days(),
         dry_run=config.is_dry_run(),
         auto_start=config.is_auto_start_windows(),
+        auto_start_bot=config.is_auto_start_bot(),
         dashboard_port=config.get_dashboard_port(),
     )
 
@@ -168,6 +169,22 @@ def api_relogin():
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
+@app.route("/api/bot/dry-run", methods=["POST"])
+def api_bot_dry_run():
+    data = request.json or {}
+    if "dry_run" not in data:
+        return jsonify({"success": False, "message": "Missing dry_run boolean parameter."}), 400
+    enabled = bool(data["dry_run"])
+    try:
+        config.update_dry_run(enabled)
+        label = "Dry Run (safe mode)" if enabled else "Live Mode (flagging active)"
+        session_logger.log("info", "DRY_RUN_TOGGLED", dry_run=str(enabled))
+        database.log_activity("info", "SETTING_CHANGED", detail=f"Mode set to {label}")
+        return jsonify({"success": True, "dry_run": enabled, "message": f"Switched to {label}"})
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
 @app.route("/api/settings", methods=["POST"])
 def api_settings():
     data = request.json or {}
@@ -180,6 +197,8 @@ def api_settings():
             config.update_dry_run(bool(data["dry_run"]))
         if "auto_start" in data:
             config.update_auto_start_windows(bool(data["auto_start"]))
+        if "auto_start_bot" in data:
+            config.update_auto_start_bot(bool(data["auto_start_bot"]))
         return jsonify({"success": True, "message": "Settings saved."})
     except Exception as exc:
         return jsonify({"success": False, "message": str(exc)}), 500

@@ -6,11 +6,24 @@ Users interact with settings through the dashboard UI only —
 they never need to edit .env manually.
 """
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv, set_key
 
-# Path to .env file — always relative to the project root (one level above src/)
-_ROOT = Path(__file__).resolve().parent.parent.parent
+
+def get_app_dir() -> Path:
+    """
+    Get the persistent application directory where .env, database, and logs live.
+    When running as a packaged PyInstaller EXE, this is the directory containing the EXE.
+    When running from source code, this is the project root (above src/).
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+# Path to .env file — always in the persistent app directory
+_ROOT = get_app_dir()
 ENV_PATH = _ROOT / ".env"
 
 
@@ -19,11 +32,31 @@ def load():
     if ENV_PATH.exists():
         load_dotenv(str(ENV_PATH), override=True)
     else:
-        # Create empty .env from .env.example if it doesn't exist
+        # Create empty .env from .env.example if available
         example = _ROOT / ".env.example"
+        if not example.exists() and getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            bundled_example = Path(sys._MEIPASS) / ".env.example"
+            if bundled_example.exists():
+                example = bundled_example
+
         if example.exists():
             ENV_PATH.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
-            load_dotenv(str(ENV_PATH), override=True)
+        else:
+            default_env = (
+                "# FedEx Email Auto-Flagger Configuration\n"
+                "PORTAL_API_TOKEN=\n"
+                "OUTLOOK_MAILBOX_URL=https://outlook.cloud.microsoft/mail/pn@registrarcorp.com/\n"
+                "SENDER_FILTER=myfda@registrarcorp.com\n"
+                "CHECK_INTERVAL_SECONDS=120\n"
+                "API_DATE_RANGE_DAYS=2\n"
+                "DASHBOARD_PORT=5000\n"
+                "DRY_RUN=true\n"
+                "AUTO_START_BOT=false\n"
+                "BROWSER_PROFILE_DIR=./browser_profile\n"
+                "AUTO_START_WINDOWS=false\n"
+            )
+            ENV_PATH.write_text(default_env, encoding="utf-8")
+        load_dotenv(str(ENV_PATH), override=True)
 
 
 def is_first_launch() -> bool:
@@ -66,6 +99,9 @@ def get_browser_profile_dir() -> str:
 def is_auto_start_windows() -> bool:
     return os.getenv("AUTO_START_WINDOWS", "false").lower() in ("true", "1", "yes")
 
+def is_auto_start_bot() -> bool:
+    return os.getenv("AUTO_START_BOT", "false").lower() in ("true", "1", "yes")
+
 
 # ── Setters (write to .env and hot-reload) ───────────────────────────────────
 
@@ -82,6 +118,9 @@ def update_portal_token(token: str):
 
 def update_dry_run(enabled: bool):
     _write("DRY_RUN", "true" if enabled else "false")
+
+def update_auto_start_bot(enabled: bool):
+    _write("AUTO_START_BOT", "true" if enabled else "false")
 
 def update_check_interval(seconds: int):
     _write("CHECK_INTERVAL_SECONDS", str(max(30, int(seconds))))
